@@ -139,6 +139,17 @@ fn set(record: &mut Value, key: &str, value: Value) {
     }
 }
 
+// The query already has one builder per token. Keep map insertion order while
+// allowing the explicit unread pass to replace a node in its original slot.
+fn set_indexed_node(nodes: &mut Vec<(String, Value)>, index: &mut HashMap<String, usize>, key: &str, value: Value) {
+    if let Some(&slot) = index.get(key) {
+        nodes[slot].1 = value;
+    } else {
+        index.insert(key.to_owned(), nodes.len());
+        nodes.push((key.to_owned(), value));
+    }
+}
+
 fn take(record: &mut Value, key: &str) -> Option<Value> {
     let Value::Map(fields) = record else { return None };
     let position = fields.iter().position(|(name, _)| name == key)?;
@@ -889,13 +900,14 @@ pub(super) fn normalize_query(query: query::Query) -> Result<FactSnapshot> {
         if let Some(error) = builder.normalization_error.take() { return Err(error); }
         builder.drain_issues(&mut issues, &mut issue_alternatives, &mut first_deep_alternative);
     }
-    let mut nodes = Value::Map(Vec::new());
+    let mut nodes = Vec::with_capacity(builders.len());
+    let mut node_index = HashMap::with_capacity(builders.len());
     let mut spaces = Value::Map(Vec::new());
-    let mut relation_fields = Value::Map(Vec::new());
-    let mut requested_fields = Value::Map(Vec::new());
-    let mut field_sources = Value::Map(Vec::new());
-    let mut diagnostic_fields = Value::Map(Vec::new());
-    let mut text_read_fields = Value::Map(Vec::new());
+    let mut relation_fields = Vec::new();
+    let mut requested_fields = Vec::new();
+    let mut field_sources = Vec::new();
+    let mut diagnostic_fields = Vec::new();
+    let mut text_read_fields = Vec::new();
     for mut builder in builders {
         let token = builder.identity;
         // Type validation visits completed nodes in order before any issue.
@@ -904,7 +916,7 @@ pub(super) fn normalize_query(query: query::Query) -> Result<FactSnapshot> {
             return Err(FactsError::TypedValueDepth(TypedValueDepth::Supplement { node: token.to_owned(), index }));
         }
         let node = builder.build();
-        set(&mut nodes, token, node);
+        set_indexed_node(&mut nodes, &mut node_index, token, node);
         if builder.screen_space && spaces.as_map().is_some_and(|entries| entries.is_empty()) {
             let (unit, origin) = match backend {
                 "windows" => ("physical_pixel", "primary_screen_top_left"),
@@ -915,17 +927,17 @@ pub(super) fn normalize_query(query: query::Query) -> Result<FactSnapshot> {
                 ("unit", text(unit)), ("origin", text(origin)), ("y_direction", text("down")),
             ]));
         }
-        set(&mut requested_fields, token, required(builder.row, "requestedFields")?.clone());
+        requested_fields.push((token.to_owned(), required(builder.row, "requestedFields")?.clone()));
         if builder.relation_fields.as_map().is_some_and(|value| !value.is_empty()) {
-            set(&mut relation_fields, token, builder.relation_fields);
+            relation_fields.push((token.to_owned(), builder.relation_fields));
         }
         if builder.field_sources.as_map().is_some_and(|value| !value.is_empty()) {
-            set(&mut field_sources, token, builder.field_sources);
+            field_sources.push((token.to_owned(), builder.field_sources));
         }
         if !builder.diagnostic_fields.is_empty() {
-            set(&mut diagnostic_fields, token, Value::Seq(builder.diagnostic_fields));
+            diagnostic_fields.push((token.to_owned(), Value::Seq(builder.diagnostic_fields)));
         }
-        if builder.text_read { set(&mut text_read_fields, token, Value::Seq(path(&["text", "content"]))); }
+        if builder.text_read { text_read_fields.push((token.to_owned(), Value::Seq(path(&["text", "content"])))); }
     }
     for token in array(required(&query.facts, "unread")?)? {
         let token = token.as_str().ok_or(FactsError::Invalid("expected unread node identity"))?;
@@ -933,7 +945,7 @@ pub(super) fn normalize_query(query: query::Query) -> Result<FactSnapshot> {
             ("states", Value::Map(Vec::new())), ("geometry", Value::Map(Vec::new())),
             ("relations", Value::Map(Vec::new())), ("supplements", Value::Seq(Vec::new())),
         ]);
-        set(&mut nodes, token, node);
+        set_indexed_node(&mut nodes, &mut node_index, token, node);
         issues.push(map([
             ("path", Value::Seq(path(&["nodes", token]))), ("state", text("not_read")),
             ("detail", text(if query.facts.get("outsideWindowNodes").and_then(Value::as_seq)
@@ -954,15 +966,16 @@ pub(super) fn normalize_query(query: query::Query) -> Result<FactSnapshot> {
     let observation = map([
         ("backend", text(backend)), ("session", required(&query.facts, "session")?.clone()),
         ("id", text(capture)), ("interval_ns", query.interval.clone()),
-        ("roots", required(&query.facts, "roots")?.clone()), ("nodes", nodes), ("coordinate_spaces", spaces),
+        ("roots", required(&query.facts, "roots")?.clone()), ("nodes", Value::Map(nodes)), ("coordinate_spaces", spaces),
         ("issues", Value::Seq(issues)),
     ]);
     let mut metadata = map([
         ("surface", required(&query.facts, "surface")?.clone()),
         ("change_token", query.facts.get("changeToken").cloned().unwrap_or(Value::Null)),
-        ("relation_fields", relation_fields), ("requested_fields", requested_fields),
+        ("relation_fields", Value::Map(relation_fields)), ("requested_fields", Value::Map(requested_fields)),
         ("requested_relations", required(&query.facts, "requestedRelations")?.clone()),
-        ("field_sources", field_sources), ("diagnostic_fields", diagnostic_fields), ("text_read_fields", text_read_fields),
+        ("field_sources", Value::Map(field_sources)), ("diagnostic_fields", Value::Map(diagnostic_fields)),
+        ("text_read_fields", Value::Map(text_read_fields)),
         ("focused_element", query.facts.get("focusedElement").cloned().unwrap_or(Value::Null)),
     ]);
     if !issue_alternatives.is_empty() {

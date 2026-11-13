@@ -5,10 +5,11 @@
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::{self, Write};
+use std::sync::OnceLock;
 
 use super::{
     facts::FactSnapshot,
-    numbering::PartAliases,
+    numbering::{NodeId, Part, PartAliases},
     render::text::{json, JsonFormat, TextError},
     value::Value,
 };
@@ -332,7 +333,7 @@ impl<'a> Source<'a> {
         if self.statuses.get(primary).is_some() {
             return Vec::new();
         }
-        let Some(selectors) = selectors.and_then(|values| values.get(self.token)) else {
+        let Some(selectors) = selectors else {
             return Vec::new();
         };
         let Some(selector) = selectors.get(primary).filter(|value| truth(Some(value))) else {
@@ -514,6 +515,88 @@ struct Document {
     keys: HashSet<String>,
 }
 
+/// Metadata slots and field decisions belong to the native capture. The
+/// preview and final presentation still each construct their numbered output.
+pub(crate) struct ProjectionSources {
+    field_sources: Vec<Option<usize>>,
+    diagnostic_fields: Vec<Option<usize>>,
+    capabilities: Vec<Option<usize>>,
+    fields: Vec<OnceLock<NodeSemantics>>,
+}
+
+impl ProjectionSources {
+    pub(crate) fn new(snapshot: &FactSnapshot, ordinals: &HashMap<String, NodeId>) -> Self {
+        let index = |name| {
+            let mut slots = vec![None; ordinals.len()];
+            for (slot, (token, _)) in entries(snapshot.metadata.get(name)).iter().enumerate() {
+                if let Some(id) = ordinals.get(token) {
+                    slots[id.0].get_or_insert(slot);
+                }
+            }
+            slots
+        };
+        Self {
+            field_sources: index("field_sources"),
+            diagnostic_fields: index("diagnostic_fields"),
+            capabilities: index("operation_capabilities"),
+            fields: (0..ordinals.len()).map(|_| OnceLock::new()).collect(),
+        }
+    }
+
+    fn node<'a>(&'a self, metadata: &'a Value, id: NodeId) -> NodeMetadata<'a> {
+        let row = |name, slots: &[Option<usize>]| {
+            let slot = slots.get(id.0).copied().flatten()?;
+            entries(metadata.get(name)).get(slot).map(|(_, value)| value)
+        };
+        NodeMetadata {
+            field_sources: row("field_sources", &self.field_sources),
+            diagnostic_fields: row("diagnostic_fields", &self.diagnostic_fields),
+            capabilities: row("operation_capabilities", &self.capabilities),
+            fields: &self.fields[id.0],
+        }
+    }
+}
+
+struct NodeMetadata<'a> {
+    field_sources: Option<&'a Value>,
+    diagnostic_fields: Option<&'a Value>,
+    capabilities: Option<&'a Value>,
+    fields: &'a OnceLock<NodeSemantics>,
+}
+
+struct NodeSemantics {
+    primary: Option<String>,
+    numeric_aliases: Vec<Value>,
+    disclosure: HashMap<String, bool>,
+    document: Option<Document>,
+    states: HashMap<String, (&'static str, bool)>,
+    decisions: HashMap<String, &'static str>,
+}
+
+impl NodeSemantics {
+    fn collect(source: &Source, role: Option<&str>, selectors: Option<&Value>) -> Result<Self> {
+        let primary = source.primary()?;
+        let numeric_aliases = source.numeric_aliases(primary.as_deref(), selectors);
+        let disclosure = if matches!(role, Some("row" | "tree_item")) {
+            source.agreeing_booleans("disclosing", false)
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        let document = source.document()?;
+        let states = ["unsaved", "invalid"].into_iter().flat_map(|name| {
+            source.agreeing_booleans(name, true).into_iter()
+                .map(move |(key, value)| (key.to_owned(), (name, value)))
+        }).collect();
+        let decisions = source.decisions()?.into_iter()
+            .map(|(key, (field, _))| (key.to_owned(), field))
+            .collect();
+        Ok(Self { primary, numeric_aliases, disclosure, document, states, decisions })
+    }
+}
+
 #[derive(Default)]
 struct Ledger {
     slots: HashMap<(String, String), usize>,
@@ -672,13 +755,11 @@ fn make_node(
     source: &Source,
     reference: &str,
     aliases: &Aliases,
-    metadata: &Value,
+    metadata: NodeMetadata<'_>,
     projection: &mut Projection,
 ) -> Result<Record> {
     let role = source.original.get("role").and_then(Value::as_str);
-    let capabilities = metadata
-        .get("operation_capabilities")
-        .and_then(|items| items.get(source.token))
+    let capabilities = metadata.capabilities
         .cloned()
         .unwrap_or_else(|| map(["click", "typeText", "replaceText", "focus"].map(|key| (key, text("unknown")))));
     let mut node = vec![
@@ -691,36 +772,21 @@ fn make_node(
     if distinct_subrole {
         put(&mut node, "subrole", text(role.unwrap()));
     }
-    let primary = source.primary()?;
-    if let Some(primary) = &primary {
+    let fields = match metadata.fields.get() {
+        Some(fields) => fields,
+        None => {
+            let fields = NodeSemantics::collect(source, role, metadata.field_sources)?;
+            metadata.fields.get_or_init(|| fields)
+        }
+    };
+    let primary = fields.primary.as_deref();
+    if let Some(primary) = primary {
         projection.value_fields.push((reference.into(), text(primary)));
     }
-    let numeric_aliases = source.numeric_aliases(primary.as_deref(), metadata.get("field_sources"));
-    if !numeric_aliases.is_empty() {
-        put(&mut node, "_numericValueAliases", Value::Seq(numeric_aliases));
+    if !fields.numeric_aliases.is_empty() {
+        put(&mut node, "_numericValueAliases", Value::Seq(fields.numeric_aliases.clone()));
     }
-    let disclosure = if matches!(role, Some("row" | "tree_item")) {
-        source
-            .agreeing_booleans("disclosing", false)
-            .into_iter()
-            .collect::<HashMap<_, _>>()
-    } else {
-        HashMap::new()
-    };
-    let document = source.document()?;
-    let states = ["unsaved", "invalid"]
-        .into_iter()
-        .flat_map(|name| {
-            source
-                .agreeing_booleans(name, true)
-                .into_iter()
-                .map(move |(key, value)| (key, (name, value)))
-        })
-        .collect::<HashMap<_, _>>();
-    let decisions = source.decisions()?;
-    let diagnostics = seq(metadata
-        .get("diagnostic_fields")
-        .and_then(|items| items.get(source.token)));
+    let diagnostics = seq(metadata.diagnostic_fields);
 
     for (key, original) in entries(Some(source.values)) {
         let key = key.as_str();
@@ -736,8 +802,9 @@ fn make_node(
             (!integer || safe_integer(Some(original)).is_some()).then_some(name)
         } else if let Some(field) = read_only(key).filter(|_| source.statuses.get(key).is_none()) {
             Some(field)
-        } else if let Some((field, item)) = decisions.get(key) {
-            value = if *field == "rangeAllowedValues" {
+        } else if let Some(&field) = fields.decisions.get(key) {
+            let item = if field == "itemStatus" { required(original, "value")? } else { required(source.values, key)? };
+            value = if field == "rangeAllowedValues" {
                 Cow::Owned(Value::Seq(
                     seq(Some(item))
                         .iter()
@@ -751,11 +818,11 @@ fn make_node(
                         .collect::<Result<_>>()?,
                 ))
             } else {
-                Cow::Borrowed(*item)
+                Cow::Borrowed(item)
             };
             put(&mut node, "preserveGroup", Value::Bool(true));
-            Some(*field)
-        } else if let Some((field, state)) = states.get(key) {
+            Some(field)
+        } else if let Some((field, state)) = fields.states.get(key) {
             value = Cow::Owned(Value::Bool(*state));
             Some(*field)
         } else if let Some(
@@ -767,14 +834,14 @@ fn make_node(
         } else if key == "states.expanded" && matches!(original.as_str(), Some("expanded" | "collapsed")) {
             value = Cow::Owned(Value::Bool(original.as_str() == Some("expanded")));
             Some("expanded")
-        } else if let Some(disclosing) = disclosure.get(key) {
+        } else if let Some(disclosing) = fields.disclosure.get(key) {
             value = Cow::Owned(Value::Bool(*disclosing));
             Some("disclosing")
-        } else if let Some(document) = document.as_ref().filter(|report| report.keys.contains(key)) {
+        } else if let Some(document) = fields.document.as_ref().filter(|report| report.keys.contains(key)) {
             value = Cow::Borrowed(&document.value);
             Some(document.field)
         } else if let Some(kind) = value_kind(key) {
-            let field = if primary.as_deref() == Some(key) { "value" } else { kind };
+            let field = if primary == Some(key) { "value" } else { kind };
             value = Cow::Owned(value_text(original, aliases)?);
             if field == "value" {
                 if matches!(original, Value::Int(_) | Value::BigInt(_) | Value::Float(_)) {
@@ -940,7 +1007,7 @@ fn make_node(
         if status.get("textRef").is_some() {
             projection.text_refs.put(reference, key, status.clone());
             let mut caption = String::from("; captured text available");
-            if primary.as_deref() == Some(key) {
+            if primary == Some(key) {
                 caption.push_str(" via this element's read_text()");
             } else {
                 caption.push_str("; no public continuation for this field");
@@ -1007,7 +1074,8 @@ fn project_edges<'a>(
     nodes: &mut [Node],
     indices: &HashMap<&str, usize>,
     relations: &'a [Value],
-    native: &HashMap<&str, &Value>,
+    native: &[(String, Value)],
+    ordinals: &HashMap<String, NodeId>,
     unread: &HashSet<&str>,
     aliases: &Aliases,
 ) -> Result<Vec<&'a Value>> {
@@ -1033,9 +1101,9 @@ fn project_edges<'a>(
         let source = node.record.as_mut().ok_or_else(|| missing("relation record"))?;
         let has_unread = targets.iter().any(|target| unread.contains(target));
         if matches!(state, "absent" | "unsupported") {
-            let role = native
-                .get(token)
-                .and_then(|node| node.get("role"))
+            let role = ordinals.get(token)
+                .and_then(|id| native.get(id.0))
+                .and_then(|(_, node)| node.get("role"))
                 .and_then(Value::as_str);
             let region = matches!(
                 role,
@@ -1252,7 +1320,9 @@ pub(crate) fn source_order(snapshot: &FactSnapshot) -> Result<Vec<&str>> {
 
 pub(crate) fn project_numbered(
     snapshot: &FactSnapshot,
-    tokens: &[String],
+    part: &Part<'_>,
+    ordinals: &HashMap<String, NodeId>,
+    sources: &ProjectionSources,
     numbers: &PartAliases,
     scope_kind: &Value,
     driver_features: &Value,
@@ -1269,18 +1339,17 @@ pub(crate) fn project_numbered(
         .ordered()
         .iter()
         .map(|(node, number)| {
-            let token = tokens.get(node.0).ok_or_else(|| missing("numbered node"))?;
+            let token = part.tokens.get(node.0).ok_or_else(|| missing("numbered node"))?;
             Ok((token.as_str(), number.to_string()))
         })
         .collect::<Result<Aliases>>()?;
-    let refs = source_order(snapshot)?
-        .into_iter()
-        .map(|token| Ok((alias(&aliases, token)?.to_owned(), text(token))))
+    let refs = part.source_order.iter()
+        .map(|id| {
+            let token = part.tokens.get(id.0).ok_or_else(|| missing("numbered node"))?;
+            Ok((alias(&aliases, token)?.to_owned(), text(token.clone())))
+        })
         .collect::<Result<Record>>()?;
-    let native: HashMap<_, _> = entries(snapshot.observation.get("nodes"))
-        .iter()
-        .map(|(token, node)| (token.as_str(), node))
-        .collect();
+    let native = entries(snapshot.observation.get("nodes"));
     let requested_roots = seq(snapshot.observation.get("roots"))
         .iter()
         .map(|item| item.as_str().ok_or_else(|| missing("requested root")))
@@ -1299,7 +1368,8 @@ pub(crate) fn project_numbered(
     for row in rows {
         let token = string(row, "node")?;
         let reference = alias(&aliases, token)?;
-        let original = *native.get(token).ok_or_else(|| missing("original node"))?;
+        let &id = ordinals.get(token).ok_or_else(|| missing("original node"))?;
+        let (_, original) = native.get(id.0).ok_or_else(|| missing("original node"))?;
         let index = nodes.len();
         indices.insert(token, index);
         let record = if flag(row.get("observed")) || requested_set.contains(token) {
@@ -1309,7 +1379,7 @@ pub(crate) fn project_numbered(
                 &source,
                 reference,
                 &aliases,
-                &snapshot.metadata,
+                sources.node(&snapshot.metadata, id),
                 &mut projection,
             )?)
         } else {
@@ -1325,13 +1395,14 @@ pub(crate) fn project_numbered(
         });
     }
     // Native targets can be known and retained without a fact row.
-    for token in native.keys() {
+    for (token, _) in native {
+        let token = token.as_str();
         if !indices.contains_key(token) {
             indices.insert(token, nodes.len());
             nodes.push(Node {
                 record: None,
                 children: Vec::new(),
-                token: (*token).to_owned(),
+                token: token.to_owned(),
             });
         }
     }
@@ -1340,7 +1411,8 @@ pub(crate) fn project_numbered(
         &mut nodes,
         &indices,
         seq(snapshot.facts.get("relations")),
-        &native,
+        native,
+        ordinals,
         &unread_set,
         &aliases,
     )?;
@@ -1436,7 +1508,7 @@ pub(crate) fn project_numbered(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::numbering::{acquisition_aliases, NodeId, Part, SessionAliases};
+    use crate::numbering::{acquisition_aliases, SessionAliases};
 
     fn words(items: &[&str]) -> Value {
         Value::Seq(items.iter().map(|item| text(*item)).collect())
@@ -1495,18 +1567,56 @@ mod tests {
             .map(|token| NodeId(tokens.iter().position(|other| other == token).unwrap()))
             .collect::<Vec<_>>();
         let mut session = SessionAliases::new("driver".into());
-        let aliases = acquisition_aliases(
-            &mut session,
-            &Part {
-                session: "driver",
-                surface: None,
-                scope_kind: Some("window"),
-                tokens: &tokens,
-                source_order: &source_order,
-            },
-        )
-        .unwrap();
-        project_numbered(snapshot, &tokens, &aliases, &text("window"), &words(&[])).unwrap()
+        let part = Part {
+            session: "driver", surface: None, scope_kind: Some("window"), tokens: &tokens, source_order: &source_order,
+        };
+        let ordinals = tokens.iter().enumerate().map(|(index, token)| (token.clone(), NodeId(index))).collect();
+        let aliases = acquisition_aliases(&mut session, &part).unwrap();
+        let sources = ProjectionSources::new(snapshot, &ordinals);
+        project_numbered(snapshot, &part, &ordinals, &sources, &aliases, &text("window"), &words(&[])).unwrap()
+    }
+
+    #[test]
+    fn shared_field_decisions_bind_element_values_to_each_numbering() {
+        let element = || map([("element", text("child"))]);
+        let values = map([
+            ("role", text("slider")),
+            ("control_value.value", element()),
+            ("numeric_value.allowed_values", Value::Seq(vec![text("element 1"), element()])),
+        ]);
+        let paths = map([
+            ("role", words(&["role"])),
+            ("control_value.value", words(&["control_value", "value"])),
+            ("numeric_value.allowed_values", words(&["numeric_value", "allowed_values"])),
+        ]);
+        let input = snapshot(
+            map([("root", map([("role", text("slider"))])), ("child", empty())]),
+            vec![row("root", true, values, paths, empty()), row("child", false, empty(), empty(), empty())],
+            vec![],
+            words(&[]),
+            empty(),
+        );
+        let tokens = ["root".into(), "child".into()];
+        let part = Part {
+            session: "driver", surface: None, scope_kind: Some("window"), tokens: &tokens,
+            source_order: &[NodeId(0), NodeId(1)],
+        };
+        let ordinals = HashMap::from([("root".into(), NodeId(0)), ("child".into(), NodeId(1))]);
+        let sources = ProjectionSources::new(&input, &ordinals);
+        for (root, child) in [("0", "1"), ("10", "12")] {
+            let aliases = PartAliases::from_native(
+                &part, &HashMap::from([("root".into(), root.into()), ("child".into(), child.into())]),
+            ).unwrap();
+            let result = project_numbered(
+                &input, &part, &ordinals, &sources, &aliases, &text("window"), &words(&[]),
+            ).unwrap();
+            let node = &seq(result.get("roots"))[0];
+            assert_eq!(node.get("ref"), Some(&text(root)));
+            assert_eq!(node.get("value"), Some(&text(format!("element {child}"))));
+            assert_eq!(node.get("rangeAllowedValues"), Some(&Value::Seq(vec![
+                text("element 1"), map([("element", text(child))]),
+            ])));
+        }
     }
 
     #[test]
@@ -1696,7 +1806,10 @@ mod tests {
     #[test]
     fn invalid_scope_kind_is_rejected_before_reference_projection() {
         let input = snapshot(empty(), Vec::new(), Vec::new(), words(&[]), empty());
-        let invalid = project_numbered(&input, &[], &PartAliases::default(), &text("desktop"), &words(&[]));
+        let part = Part { session: "driver", surface: None, scope_kind: None, tokens: &[], source_order: &[] };
+        let ordinals = HashMap::new();
+        let sources = ProjectionSources::new(&input, &ordinals);
+        let invalid = project_numbered(&input, &part, &ordinals, &sources, &PartAliases::default(), &text("desktop"), &words(&[]));
         assert_eq!(invalid.unwrap_err().to_string(), "Unknown observation scope kind");
     }
 

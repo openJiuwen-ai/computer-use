@@ -1,7 +1,8 @@
 # coding: utf-8
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from sys import _getframe, getrecursionlimit, implementation, version_info
 
 from computer_use.errors import ComputerUseError
 
@@ -10,14 +11,30 @@ SDK_VERSION = "0.0.1"
 # pylint: disable-next=invalid-name
 _handler = None
 _observation_diagnostic = None
+_pipeline_transport = None
+# The shortcut skips ordinary Python and C serializer frames. Near either
+# recursion boundary let the original path decide whether to emit the trace.
+_PIPELINE_FRAME_MARGIN = 96
+_PIPELINE_STACK_PROBE = str
+for _level in range(40):
+    _PIPELINE_STACK_PROBE = (_PIPELINE_STACK_PROBE,)
+_PIPELINE_STACK_SUPPORTED = implementation.name == "cpython" and version_info[:2] >= (3, 11)
 # pylint: disable-next=invalid-name
 _structured = False
 
 
 def set_diagnostic_handler(handler):
-    global _handler, _observation_diagnostic
+    global _handler, _observation_diagnostic, _pipeline_transport
     _handler = handler
     _observation_diagnostic = None
+    _pipeline_transport = None
+
+
+def _register_pipeline_transport(handler, send):
+    """Bind the standard worker's primitive trace sink to its active callback."""
+    global _pipeline_transport
+    if _PIPELINE_STACK_SUPPORTED:
+        _pipeline_transport = (handler, send)
 
 
 def _register_observation_diagnostic(handler, encoded_sink):
@@ -35,12 +52,26 @@ def wants_structured_observations():
     return _structured
 
 
+def _pipeline_timestamp():
+    """Capture the worker's original diagnostic timestamp."""
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _pipeline_stack_has_room():
+    try:
+        _getframe(max(0, getrecursionlimit() - _PIPELINE_FRAME_MARGIN))
+    except ValueError:
+        isinstance(0, _PIPELINE_STACK_PROBE)
+        return True
+    return False
+
+
 def diagnostic(event, *, _native_observation=None):
     try:
         handler = _handler
         if handler:
             record = {
-                "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                "timestamp": _pipeline_timestamp(),
                 **event,
             }
             if _native_observation is not None:
@@ -56,6 +87,21 @@ def diagnostic(event, *, _native_observation=None):
 
 def pipeline_diagnostic(event):
     """Serialize only the runner's small control fields, never IR/body/pixels."""
+    binding = _pipeline_transport
+    if binding is not None and binding[0] is _handler:
+        try:
+            has_room = _pipeline_stack_has_room()
+        except Exception:
+            # Stack inspection is optional (for example, an audit hook may
+            # decline frame access). Let the original diagnostic path run.
+            pass
+        else:
+            if has_room:
+                try:
+                    if binding[1](event):
+                        return
+                except Exception:
+                    return
     diagnostic(
         dict(
             kind="pipeline",

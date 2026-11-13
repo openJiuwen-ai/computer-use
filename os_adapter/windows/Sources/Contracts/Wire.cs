@@ -23,6 +23,7 @@ namespace ComputerUse.Windows
 
     internal static class Wire
     {
+        internal const int MaxJsonLength = 64 * 1024 * 1024, JsonRecursionLimit = 256;
         internal static readonly long Epoch = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         internal static readonly Stopwatch Clock = Stopwatch.StartNew();
         internal static double Now
@@ -42,7 +43,7 @@ namespace ComputerUse.Windows
 
         internal static JavaScriptSerializer Serializer()
         {
-            return new JavaScriptSerializer { MaxJsonLength = 64 * 1024 * 1024, RecursionLimit = 256 };
+            return new JavaScriptSerializer { MaxJsonLength = MaxJsonLength, RecursionLimit = JsonRecursionLimit };
         }
 
         internal static string Json(object value)

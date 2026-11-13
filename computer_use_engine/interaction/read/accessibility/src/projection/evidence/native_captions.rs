@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::{
     empty, enumerated, eq_path, overlaps, present, range, relations, rows, seq, starts, targets, text, truth,
-    Aliases, Issue, Issues, NodeId, Value,
+    Aliases, Issue, Issues, NodeId, NodeRows, Value,
 };
 use crate::projection::PassiveCaptionSource;
 
@@ -192,7 +192,10 @@ fn window_targets(node: &Value, issues: &[Issue<'_>], aliases: &Aliases<'_>) -> 
     targets.iter().map(|value| aliases.get(value.as_str()?).copied()).collect()
 }
 
-pub(super) fn capture(native: &Value, semantic: &Value, aliases: &Aliases<'_>, issue_rows: &Issues<'_>) -> HashMap<NodeId, PassiveCaptionSource> {
+pub(super) fn capture(
+    native: &Value, semantic: &Value, aliases: &Aliases<'_>, issue_rows: &Issues<'_>,
+    native_nodes: &NodeRows<'_>, value_fields: &NodeRows<'_>,
+) -> HashMap<NodeId, PassiveCaptionSource> {
     let nodes = rows(native.get("nodes"));
     let mut incoming: HashMap<&str, Vec<&str>> = HashMap::new();
     for (token, node) in nodes {
@@ -240,10 +243,10 @@ pub(super) fn capture(native: &Value, semantic: &Value, aliases: &Aliases<'_>, i
     for (reference, token) in rows(semantic.get("refs")) {
         let Some(token) = token.as_str() else { continue };
         let Some(&id) = aliases.get(token) else { continue };
-        if inconsistent.contains(&id) || semantic.get("value_fields").and_then(|fields| text(fields, reference)) != Some("control_value.value") {
+        if inconsistent.contains(&id) || value_fields.get(reference.as_str()).and_then(|field| field.as_str()) != Some("control_value.value") {
             continue;
         }
-        let Some(node) = native.get("nodes").and_then(|nodes| nodes.get(token)) else { continue };
+        let Some(&node) = native_nodes.get(token) else { continue };
         let issues = issue_rows.get(token).map(Vec::as_slice).unwrap_or(&[]);
         let Some(value) = passive_native(node, issues) else { continue };
         let mut ancestors = Vec::new();

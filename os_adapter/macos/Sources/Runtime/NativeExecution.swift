@@ -106,7 +106,7 @@ import ApplicationServices
         }
     }
 
-    func perform(_ method: String, _ raw: Any?, timeoutMs: Int) async throws -> [String: Any] {
+    func perform(_ method: String, _ raw: Any?, timeoutMs: Int) async throws -> NativeCommandResult {
         if method == "prepareObservation" { discardForegroundContinuation() }
         let token = (raw as? [String: Any])?["operation"] as? String
         let activity = token == current?.token ? pointerActivity : nil

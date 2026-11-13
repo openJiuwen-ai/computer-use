@@ -6,8 +6,8 @@ import ApplicationServices
 @MainActor enum NativeNodeQueryPipeline {
     static func collect(
         _ raw: Any?, op: NativeOperation, access: NativeQueryAccess, shareAttributeCatalogues: Bool = false,
-        collect: (String) throws -> [String: Any]
-    ) throws -> [String: Any] {
+        collect: (String) throws -> NativeCollectedObservation
+    ) throws -> NativeObservationEncoding.Publication {
         let collection = try NativeQueryPipeline.collect(
             resolveQueryScope: { try access.scopes.observationTarget(raw) },
             collectRequestedFacts: { try collect($0.node) },
@@ -24,6 +24,6 @@ import ApplicationServices
             })
         let publication = RequestDiagnostics.metrics?.start(.readPublication)
         defer { publication?.end() }
-        return NativeObservationEncoding.encode(collection, shareAttributeCatalogues: shareAttributeCatalogues)
+        return NativeObservationEncoding.publish(collection, shareAttributeCatalogues: shareAttributeCatalogues)
     }
 }

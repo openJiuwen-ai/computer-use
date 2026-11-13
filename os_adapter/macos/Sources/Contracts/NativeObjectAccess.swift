@@ -10,9 +10,9 @@ import ApplicationServices
         childrenPage: NativeInspectQuery.ChildrenPage?, relationPage: NativeInspectQuery.RelationPage?,
         advertisedFields: [String], followRelations: [String], textContent: Bool, actionDetail: NativeActionDetail,
         focusedElement: Bool
-    ) throws -> [String: Any]
+    ) throws -> NativeCollectedObservation
     func nativeRelation(_ ref: String, session: String, property: String, cursor: String?, limit: Int) throws
-        -> [String: Any]
+        -> NativeCollectedObservation
     func readText(_ ref: String, offset: Int, length: Int) throws -> [String: Any]
     func registerNativeRoot(_ element: AXUIElement, app: NSRunningApplication, scope: String) throws -> String
     func nativeActionFacts(_ ref: String) throws -> NativeElementControl.ActionFacts

@@ -341,8 +341,10 @@ namespace ComputerUse.Windows
                             "properties", properties);
         }
 
-        static void References(object data, Action<string> declare)
+        static void References(object data, Action<string> declare, int depth, ref int maximumDepth)
         {
+            if (depth > maximumDepth)
+                maximumDepth = depth;
             var record = data as IDictionary<string, object>;
             if (record != null)
             {
@@ -350,11 +352,18 @@ namespace ComputerUse.Windows
                 if (record.TryGetValue("ref", out id))
                     declare((string)id);
                 foreach (object value in record.Values)
-                    References(value, declare);
+                    References(value, declare, depth + 1, ref maximumDepth);
             }
             else if (data is IEnumerable && !(data is string))
                 foreach (object item in (IEnumerable)data)
-                    References(item, declare);
+                    References(item, declare, depth + 1, ref maximumDepth);
+        }
+
+        static int References(object data, Action<string> declare)
+        {
+            int depth = 0;
+            References(data, declare, 1, ref depth);
+            return depth;
         }
 
         static int WireBytes(object value)
@@ -362,14 +371,89 @@ namespace ComputerUse.Windows
             return Encoding.UTF8.GetByteCount(Wire.Json(value));
         }
 
+        // Serialize an admitted node once for both the byte budget and the
+        // worker's terminal JSON. Its record remains available to native callers.
+        internal sealed class Publication
+        {
+            const string NodeSlot = "\"nodes\":null";
+            readonly Dictionary<string, object> graph;
+            readonly string[] nodes;
+            readonly bool shallow;
+
+            internal Publication(Dictionary<string, object> graph, string[] nodes, bool shallow)
+            {
+                this.graph = graph;
+                this.nodes = nodes;
+                this.shallow = shallow;
+            }
+
+            internal Dictionary<string, object> Graph { get { return graph; } }
+
+            internal string Reply(Dictionary<string, object> response)
+            {
+                // The original serializer also checks the combined depth.
+                if (!shallow)
+                    return Wire.Json(response);
+                var header = new Dictionary<string, object>(graph);
+                header["nodes"] = null;
+                var envelope = new Dictionary<string, object>(response);
+                envelope["result"] = header;
+                var shell = Wire.Json(envelope);
+                int start = shell.IndexOf(NodeSlot, StringComparison.Ordinal);
+                if (start < 0 || shell.IndexOf(NodeSlot, start + NodeSlot.Length, StringComparison.Ordinal) >= 0)
+                    return Wire.Json(response);
+                int end = start + NodeSlot.Length;
+                int length = shell.Length - 2 + nodes.Sum(node => node.Length) + Math.Max(0, nodes.Length - 1);
+                if (length > Wire.MaxJsonLength)
+                    return Wire.Json(response);
+                var line = new StringBuilder(length);
+                line.Append(shell, 0, start).Append("\"nodes\":[");
+                for (int i = 0; i < nodes.Length; i++)
+                {
+                    if (i != 0)
+                        line.Append(',');
+                    line.Append(nodes[i]);
+                }
+                line.Append(']').Append(shell, end, shell.Length - end);
+                return line.ToString();
+            }
+        }
+
         // A complete node and its reference declarations are admitted as a
         // unit. Unexpanded referenced elements retain identity, never a false
         // empty body. No admitted field, action or relation is cut mid-value.
         sealed class BoundedNodes
         {
+            sealed class EncodedNode
+            {
+                internal readonly Dictionary<string, object> Record;
+                internal readonly string Json;
+                internal readonly int Bytes, Depth;
+
+                internal EncodedNode(Dictionary<string, object> record, int depth)
+                {
+                    Record = record;
+                    Json = Wire.Json(record);
+                    Bytes = Encoding.UTF8.GetByteCount(Json) + 1;
+                    Depth = depth;
+                }
+            }
+
+            sealed class StagedNode
+            {
+                internal readonly string Id;
+                internal readonly Dictionary<string, object> Record;
+                internal int Depth;
+
+                internal StagedNode(string id, Dictionary<string, object> record)
+                {
+                    Id = id;
+                    Record = record;
+                }
+            }
+
             readonly Dictionary<string, Dictionary<string, object>> source;
-            readonly Dictionary<string, Dictionary<string, object>> kept =
-                new Dictionary<string, Dictionary<string, object>>();
+            readonly Dictionary<string, EncodedNode> kept = new Dictionary<string, EncodedNode>();
             int bytes;
 
             internal BoundedNodes(Dictionary<string, Dictionary<string, object>> source, int bytes)
@@ -378,7 +462,22 @@ namespace ComputerUse.Windows
                 this.bytes = bytes;
             }
 
-            internal object[] Nodes { get { return kept.Values.ToArray(); } }
+            internal Publication Publish(Dictionary<string, object> graph)
+            {
+                var nodes = new object[kept.Count];
+                var fragments = new string[nodes.Length];
+                int i = 0;
+                bool shallow = true;
+                foreach (var node in kept.Values)
+                {
+                    nodes[i] = node.Record;
+                    fragments[i++] = node.Json;
+                    // The response, observation and nodes array wrap each row.
+                    shallow &= node.Depth <= Wire.JsonRecursionLimit - 3;
+                }
+                graph["nodes"] = nodes;
+                return new Publication(graph, fragments, shallow);
+            }
 
             internal Dictionary<string, object> Declaration(string id)
             {
@@ -391,44 +490,64 @@ namespace ComputerUse.Windows
                 return stub;
             }
 
-            internal bool Admit(object value, Dictionary<string, object> row = null, int limit = WireBudget)
+            internal bool AdmitNode(Dictionary<string, object> row)
             {
-                var staged = new Dictionary<string, Dictionary<string, object>>();
-                var pending = new Queue<Dictionary<string, object>>();
+                return Admit(row, row, WireBudget);
+            }
+
+            internal bool AdmitIssue(object issue, int limit)
+            {
+                return Admit(issue, null, limit);
+            }
+
+            bool Admit(object value, Dictionary<string, object> row, int limit)
+            {
+                var staged = new List<StagedNode>();
+                var stagedIds = new HashSet<string>();
+                StagedNode first = null;
                 if (row != null)
-                    staged.Add((string)row["id"], row);
+                {
+                    var id = (string)row["id"];
+                    first = new StagedNode(id, row);
+                    staged.Add(first);
+                    stagedIds.Add(id);
+                }
                 Action<string> dependency = id =>
                 {
-                    if (kept.ContainsKey(id) || staged.ContainsKey(id))
+                    if (kept.ContainsKey(id) || !stagedIds.Add(id))
                         return;
-                    var stub = Declaration(id);
-                    staged.Add(id, stub);
-                    pending.Enqueue(stub);
+                    staged.Add(new StagedNode(id, Declaration(id)));
                 };
-                References(value, dependency);
-                while (pending.Count != 0)
-                    References(pending.Dequeue(), dependency);
+                int depth = References(value, dependency);
+                if (first != null)
+                    first.Depth = depth;
+                for (int i = first == null ? 0 : 1; i < staged.Count; i++)
+                    staged[i].Depth = References(staged[i].Record, dependency);
 
                 int added = row == null ? WireBytes(value) + 1 : 0;
+                var fragments = new List<KeyValuePair<string, EncodedNode>>(staged.Count);
                 foreach (var entry in staged)
                 {
-                    Dictionary<string, object> prior;
-                    added += WireBytes(entry.Value) + 1;
-                    if (kept.TryGetValue(entry.Key, out prior))
-                        added -= WireBytes(prior) + 1;
+                    EncodedNode prior;
+                    kept.TryGetValue(entry.Id, out prior);
+                    var fragment = prior != null && Object.ReferenceEquals(entry.Record, prior.Record)
+                        ? prior
+                        : new EncodedNode(entry.Record, entry.Depth);
+                    fragments.Add(new KeyValuePair<string, EncodedNode>(entry.Id, fragment));
+                    added += fragment.Bytes - (prior == null ? 0 : prior.Bytes);
                     if (bytes + added > limit)
                         return false;
                 }
                 if (bytes + added > limit)
                     return false;
-                foreach (var entry in staged)
-                    kept[entry.Key] = entry.Value;
+                foreach (var fragment in fragments)
+                    kept[fragment.Key] = fragment.Value;
                 bytes += added;
                 return true;
             }
         }
 
-        static Dictionary<string, object> Bound(
+        static Publication Bound(
             Dictionary<string, object> graph, Dictionary<string, Dictionary<string, object>> declarations,
             IEnumerable<string> roots, IEnumerable<string> ordered, Dictionary<string, object> read)
         {
@@ -440,14 +559,14 @@ namespace ComputerUse.Windows
             foreach (string root in roots)
             {
                 var stub = budget.Declaration(root);
-                if (!budget.Admit(stub, stub))
+                if (!budget.AdmitNode(stub))
                     throw new Failure("observation_unavailable", "root declaration exceeds the observation byte budget");
             }
             var includedIssues = new List<object>();
             bool truncated = false;
             foreach (object issue in issues)
             {
-                if (!budget.Admit(issue, limit: WireBudget / 8))
+                if (!budget.AdmitIssue(issue, WireBudget / 8))
                 {
                     truncated = true;
                     break;
@@ -458,7 +577,7 @@ namespace ComputerUse.Windows
             foreach (string id in ordered.Distinct())
             {
                 var row = declarations[id];
-                if (!budget.Admit(row, row))
+                if (!budget.AdmitNode(row))
                 {
                     omittedNodes = true;
                     break;
@@ -470,11 +589,10 @@ namespace ComputerUse.Windows
                 read["complete"] = false;
             }
             read["issues"] = includedIssues.ToArray();
-            graph["nodes"] = budget.Nodes;
-            return graph;
+            return budget.Publish(graph);
         }
 
-        internal static Dictionary<string, object> Encode(
+        internal static Publication Encode(
             string session, string surface, Dictionary<string, object> observed, IEnumerable<string> roots,
             IEnumerable<object> records, IEnumerable<object> edges, IEnumerable<string> unread,
             IEnumerable<string> notes, IEnumerable<string> requestedRelations, string changeToken = null,

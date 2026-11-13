@@ -36,16 +36,19 @@ class Server:
         self.native = None
         self.fatal = None
 
+    def encode_reply(self, request_id, **value):
+        return json.dumps(
+            dict(version=self.version or 6, session=self.session, id=request_id, **value),
+            ensure_ascii=True,
+            allow_nan=False,
+            separators=(",", ":"),
+        ) + "\n"
+
     def reply(self, request_id, **value):
-        self.output.write(
-            json.dumps(
-                dict(version=self.version or 6, session=self.session, id=request_id, **value),
-                ensure_ascii=True,
-                allow_nan=False,
-                separators=(",", ":"),
-            )
-            + "\n"
-        )
+        self.write(self.encode_reply(request_id, **value))
+
+    def write(self, line):
+        self.output.write(line)
         self.output.flush()
 
     def _reader(self):
@@ -174,9 +177,12 @@ class Server:
             fields(raw, ("version", "session", "id", "method", "params", "timeoutMs"))
             require(self.backend is not None and raw["session"] == self.session, "Invalid session.")
             if identifier in self.cache:
-                prior, reply = self.cache[identifier]
+                prior, reply, encoded_observation = self.cache[identifier]
                 require(prior == fingerprint, "Request id reused with different content.", "request_conflict")
-                self.reply(identifier, **reply)
+                if encoded_observation:
+                    self.write(reply)
+                else:
+                    self.reply(identifier, **reply)
                 return
             require(identifier > self.high_id, "Request id expired; it will not execute again.", "request_conflict")
             self.high_id = identifier
@@ -200,8 +206,16 @@ class Server:
             if ctx.context:
                 failure["context"] = ctx.context
             reply = dict(error=failure)
+        # Keep the same retained requests. A native observation is frozen at
+        # publication and can replay its original line without re-encoding.
+        result = reply.get("result")
+        encoded_observation = isinstance(result, dict) and result.get("kind") == "observation"
+        stored = self.encode_reply(identifier, **reply) if encoded_observation else reply
         if accepted and identifier not in self.cache:
-            self.cache[identifier] = (fingerprint, reply)
+            self.cache[identifier] = (fingerprint, stored, encoded_observation)
             while len(self.cache) > 256:
                 self.cache.popitem(last=False)
-        self.reply(identifier, **reply)
+        if encoded_observation:
+            self.write(stored)
+        else:
+            self.reply(identifier, **reply)

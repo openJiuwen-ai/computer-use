@@ -10,6 +10,7 @@ from typing import Any
 from computer_use_linux.contracts.native_observation import details, reference, struct, value
 
 SOURCE = "linux.atspi"
+_MISSING = object()
 
 
 def _field_value(name: str, item: Any) -> dict[str, Any]:
@@ -65,15 +66,18 @@ def _status_value(status: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _field(name: str, node: dict[str, Any]) -> dict[str, Any]:
-    status = node["fieldStatus"].get(name)
-    result = dict(
-        key=[SOURCE, name], value=(_field_value(name, node["values"][name]) if name in node["values"] else None)
-    )
-    if status is not None:
-        result["state"] = "value" if name in node["values"] else status["state"]
-        result["read"] = dict(complete=False, issues=[_issue(status)])
-    return result
+def _fields(node: dict[str, Any], requested: tuple[str, ...]) -> list[dict[str, Any]]:
+    values, statuses = node["values"], node["fieldStatus"]
+    fields = []
+    for name in requested:
+        item = values.get(name, _MISSING)
+        status = statuses.get(name)
+        result = {"key": [SOURCE, name], "value": None if item is _MISSING else _field_value(name, item)}
+        if status is not None:
+            result["state"] = status["state"] if item is _MISSING else "value"
+            result["read"] = {"complete": False, "issues": [_issue(status)]}
+        fields.append(result)
+    return fields
 
 
 def _actions(catalogue: dict[str, Any]) -> dict[str, Any]:
@@ -93,8 +97,8 @@ def _actions(catalogue: dict[str, Any]) -> dict[str, Any]:
 
 
 def _relation(edge: dict[str, Any]) -> dict[str, Any]:
-    state = edge["state"]
-    has_payload = bool(edge["targets"]) or state in ("complete", "partial")
+    state, targets = edge["state"], edge["targets"]
+    has_payload = bool(targets) or state in ("complete", "partial")
     qualifiers = {
         key: edge[key] for key in ("certainty", "state", "offset", "total", "cursor", "detail") if key in edge
     }
@@ -115,7 +119,7 @@ def _relation(edge: dict[str, Any]) -> dict[str, Any]:
         read.setdefault("issues", []).extend(_issue(status) for status in edge["failures"])
     return dict(
         key=[SOURCE, edge["property"]],
-        value=dict(nativeType="AtspiAccessible[]", data=dict(items=[reference(ref) for ref in edge["targets"]]))
+        value=dict(nativeType="AtspiAccessible[]", data=dict(items=[reference(ref) for ref in targets]))
         if has_payload
         else None,
         state="value" if has_payload else state,
@@ -140,22 +144,34 @@ def encode_observation(result: dict[str, Any]) -> dict[str, Any]:
     edges = result.get("relations", [result["relation"]] if "relation" in result else [])
     roots = result.get("roots", [result["relation"]["source"]] if "relation" in result else [])
     nodes: dict[str, dict[str, Any]] = {}
+    requested_details: dict[tuple[str, ...], list[list[Any]]] = {}
 
     def declare(ref: str) -> dict[str, Any]:
-        if ref not in nodes:
-            nodes[ref] = dict(id=ref, source=SOURCE, kind="element", nativeType="AtspiAccessible", properties=None)
-        return nodes[ref]
+        node = nodes.get(ref)
+        if node is None:
+            node = nodes[ref] = dict(id=ref, source=SOURCE, kind="element", nativeType="AtspiAccessible", properties=None)
+        return node
+
+    def read_details(requested: tuple[str, ...]) -> dict[str, Any]:
+        # The encoded qualifiers are immutable until this graph is written.
+        # Keep their wire representation as a list, even though the lookup
+        # uses an immutable copy of the validated field inventory.
+        qualifiers = requested_details.get(requested)
+        if qualifiers is None:
+            qualifiers = requested_details[requested] = details(requested_fields=list(requested))
+        return {"api": "libatspi", "details": qualifiers}
 
     for row in rows:
         node = declare(row["node"])
-        node["properties"] = [_field(name, row) for name in row["requestedFields"]]
+        requested = tuple(row["requestedFields"])
+        node["properties"] = _fields(row, requested)
         node["properties"].append(_actions(row["actions"]))
-        node["read"] = dict(api="libatspi", details=details(requested_fields=row["requestedFields"]))
+        node["read"] = read_details(requested)
     for edge in edges:
         node = declare(edge["source"])
         if node["properties"] is None:
             node["properties"] = []
-            node["read"] = dict(api="libatspi", details=details(requested_fields=[]))
+            node["read"] = read_details(())
         node["properties"].append(_relation(edge))
         for ref in edge["targets"]:
             declare(ref)

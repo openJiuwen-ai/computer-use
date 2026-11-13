@@ -82,10 +82,8 @@ import ApplicationServices
 
     /// Retain the exact returned batch, never a later resampling of its values.
     /// Only write operations call this. Every reference stays within that lease.
-    func retain(_ batch: [String: Any]) throws {
-        guard let observed = (batch["observed"] as? [String: Any])?["id"] as? String,
-            let scope = batch["surface"] as? String
-        else { throw DriverError("selection source has no collection identity", code: .invalidRequest) }
+    func retain(_ batch: NativeCollectedObservation) throws {
+        let observed = batch.stamp.id, scope = batch.surface
         var pending = [[String]: Snapshot]()
         func snapshot(_ node: String) throws -> Snapshot {
             if let value = pending[[observed, node]] { return value }
@@ -93,20 +91,15 @@ import ApplicationServices
             guard target.scope == scope else { throw DriverError("selection source scope changed", code: .staleTarget) }
             return Snapshot(target: target, scope: scope)
         }
-        for node in batch["nodes"] as? [[String: Any]] ?? [] {
-            guard let ref = node["node"] as? String, let values = node["values"] as? [String: Any],
-                let missing = node["fieldStatus"] as? [String: Any], let actions = node["actions"] as? [String: Any]
-            else { throw DriverError("invalid native selection source", code: .invalidRequest) }
-            var value = try snapshot(ref)
-            for key in node["requestedFields"] as? [String] ?? [] where Self.fields.contains(key) {
-                value.fields[key] = try Self.scalar(value: values[key], status: missing[key] as? [String: Any])
+        for node in batch.nodes {
+            var value = try snapshot(node.id)
+            for key in node.requested where Self.fields.contains(key) {
+                value.fields[key] = try Self.scalar(value: node.values[key], status: node.statuses[key])
             }
-            value.actions = try Self.actions(actions)
-            pending[[observed, ref]] = value
+            value.actions = try Self.actions(node.actions)
+            pending[[observed, node.id]] = value
         }
-        let relations =
-            batch["relations"] as? [[String: Any]] ?? (batch["relation"] as? [String: Any]).map { [$0] } ?? []
-        for edge in relations {
+        for edge in batch.relations {
             guard let ref = edge["source"] as? String, let property = edge["property"] as? String,
                 let targets = edge["targets"] as? [String]
             else { throw DriverError("invalid native relation dependency", code: .invalidRequest) }

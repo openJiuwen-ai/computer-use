@@ -34,7 +34,7 @@ import ApplicationServices
     private let nativeResources = AXNativeValueResources()
     private struct Acquisition {
         let catalogue: (status: AXError, names: CFArray?)?
-        let sampleFields: [String]
+        let sampleFields: Set<String>
         let batchFields: [String]
         let batch: AXAttributeReader.Result
         let prefetched: [AXAttributeReader.Field]
@@ -280,8 +280,8 @@ import ApplicationServices
         return identity.check(facts) == .changed
     }
 
-    private func stamp(_ began: Int64) -> [String: Any] {
-        ["id": UUID().uuidString, "startedAt": began, "completedAt": Int64(Date().timeIntervalSince1970 * 1000)]
+    private func stamp(_ began: Int64) -> NativeCollectedObservation.Stamp {
+        .init(id: UUID().uuidString, startedAt: began, completedAt: Int64(Date().timeIntervalSince1970 * 1000))
     }
 
     func collect(
@@ -289,7 +289,7 @@ import ApplicationServices
         childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
         advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false,
         actionDetail: NativeActionDetail = .full, focusedElement: Bool = false
-    ) throws -> [String: Any] {
+    ) throws -> NativeCollectedObservation {
         var root = try readTarget(ref)
         // Only the path traversed in this collection is complete. Historical
         // ancestors on a subtree root do not prove omitted owners disappeared.
@@ -311,7 +311,7 @@ import ApplicationServices
                 scope: root.scope): ref
         ]
         var queued = Set([ref])
-        var nodes = [[String: Any]](), links = [[String: Any]](), reasons = Set<String>()
+        var nodes = [NativeCollectedObservation.Node](), links = [[String: Any]](), reasons = Set<String>()
         var pendingLinks = [AXRelationReader.Page]()
         var pendingValues = [(index: Int, property: String, value: CFTypeRef)]()
         var pendingNativeValues = [(index: Int, property: String, value: CFTypeRef)]()
@@ -372,19 +372,27 @@ import ApplicationServices
             known[identity] = ref
             return AXFactEncoding.scalar(value, elementReference: ref)
         }
-        func encodeNative(_ raw: CFTypeRef) throws -> [String: Any] {
-            try nativeEncoder.encode(raw) { element in
-                let identity = key(element)
-                if let previous = known[identity] { return previous }
-                guard known.count < 8192, try reading() else { throw RequestDeadlineExceeded() }
-                guard let (reference, _) = try related(element, app: root.application, scope: root.scope) else {
-                    throw DriverError("native value object expired before registration", code: .staleTarget)
-                }
-                known[identity] = reference
-                return reference
+        func nativeReference(_ element: AXUIElement) throws -> String {
+            let identity = key(element)
+            if let previous = known[identity] { return previous }
+            guard known.count < 8192, try reading() else { throw RequestDeadlineExceeded() }
+            guard let (reference, _) = try related(element, app: root.application, scope: root.scope) else {
+                throw DriverError("native value object expired before registration", code: .staleTarget)
             }
+            known[identity] = reference
+            return reference
+        }
+        func encodeNative(_ raw: CFTypeRef) throws -> [String: Any] {
+            try nativeEncoder.encode(raw, reference: nativeReference)
         }
         let needsCatalogue = !advertisedFields.isEmpty || !followRelations.isEmpty || textContent
+        let readableFields = requested.filter { AXAttributeProfile.writableAttribute($0) == nil }
+        let readableSet = Set(readableFields)
+        let writableFields = requested.compactMap { field in
+            AXAttributeProfile.writableAttribute(field).map { (field, $0) }
+        }
+        let advertised = advertisedFields.map { ($0, AXAttributeProfile.writableAttribute($0) ?? $0) }
+        let advertisedNames = Array(Set(advertised.map { $0.1 }))
         func acquire(
             _ element: AXUIElement, includeIdentity: Bool, withinBudget: (() throws -> Bool)? = nil
         ) throws -> Acquisition {
@@ -398,14 +406,13 @@ import ApplicationServices
                 metric?.end()
                 catalogue = (status, names)
             } else { catalogue = nil }
-            let names = advertisedFields.map { AXAttributeProfile.writableAttribute($0) ?? $0 }
             let unavailable = catalogue.map {
-                AXFactEncoding.advertisedFieldFailures(Array(Set(names)), status: $0.status, names: $0.names)
+                AXFactEncoding.advertisedFieldFailures(advertisedNames, status: $0.status, names: $0.names)
             } ?? [:]
-            let sampleFields = requested.filter {
-                AXAttributeProfile.writableAttribute($0) == nil
-                    && unavailable[AXAttributeProfile.writableAttribute($0) ?? $0]?["state"] as? String != "unsupported"
+            let sampleFields = unavailable.isEmpty ? readableFields : readableFields.filter {
+                unavailable[$0]?["state"] as? String != "unsupported"
             }
+            let sampleSet = unavailable.isEmpty ? readableSet : Set(sampleFields)
             var fields = sampleFields
             let identityFields = includeIdentity ? catalogue.map {
                 AXIdentity.positionRequest(ElementIdentity.keys, status: $0.status, names: $0.names)
@@ -425,7 +432,7 @@ import ApplicationServices
                 if AXUIElementGetPid(element, &pid) == .success, pid == root.application.processIdentifier,
                     subtree.row(element, "AXRole") != nil
                 {
-                    for field in displayFields where sampleFields.contains(field) {
+                    for field in displayFields where sampleSet.contains(field) {
                         guard let value = subtree.row(element, field), CFGetTypeID(value) == CFStringGetTypeID()
                         else { continue }
                         prefetched.append(.init(name: field, value: value, status: .success, batchIndex: nil,
@@ -435,8 +442,11 @@ import ApplicationServices
             }
             let metric = RequestDiagnostics.metrics?.start(.readAttributes)
             defer { metric?.end() }
-            let prefetchedNames = Set(prefetched.map(\.name))
-            var liveFields = fields.filter { !prefetchedNames.contains($0) }
+            var liveFields = fields
+            if !prefetched.isEmpty {
+                let prefetchedNames = Set(prefetched.map(\.name))
+                liveFields = fields.filter { !prefetchedNames.contains($0) }
+            }
             // The live role ties a descriptive row to the same native object.
             if !prefetched.isEmpty, !liveFields.contains("AXRole") { liveFields.append("AXRole") }
             var batch = try AXAttributeReader.read(element, fields: liveFields, api: attributes, withinBudget: canRead)
@@ -480,7 +490,7 @@ import ApplicationServices
                 }
             }
             return Acquisition(
-                catalogue: catalogue, sampleFields: sampleFields, batchFields: liveFields, batch: batch,
+                catalogue: catalogue, sampleFields: sampleSet, batchFields: liveFields, batch: batch,
                 prefetched: prefetched, identity: identity,
                 identityConflict: identityConflict)
         }
@@ -489,10 +499,10 @@ import ApplicationServices
         ) throws -> [String: [String: Any]] {
             if withinBudget == nil { AXMessaging.configure(target.element) }
             let canRead = withinBudget ?? reading
-            var values = [String: Any](), missing = [String: Any]()
+            var values = [String: Any](), missing = [String: [String: Any]]()
             var relationFailures = [String: [String: Any]]()
-            var nativeProperties = [[String: Any]]()
-            var nativeReads = [String: [String: Any]]()
+            var nativeProperties = [NativeCollectedObservation.NativeProperty]()
+            var nativeReads = [String: NativeCollectedObservation.AttributeRead]()
             var textCountDeclared = false
             if needsCatalogue, let catalogue = acquisition.catalogue {
                 let status = catalogue.status, attributes = catalogue.names
@@ -500,24 +510,24 @@ import ApplicationServices
                     status == .success && (attributes as? [String])?.contains("AXNumberOfCharacters") == true
                 // Preserve the actual catalogue already obtained for profile
                 // validation. It is a method result, not a fabricated AX field.
-                var catalogue: [String: Any] = ["key": ["toolkit", "attribute_names"], "value": NSNull()]
                 if status == .success, let attributes {
-                    catalogue["value"] = try encodeNative(attributes)
+                    nativeProperties.append(try nativeEncoder.encodeAttributeCatalogue(
+                        attributes, reference: nativeReference))
                 } else {
-                    catalogue["state"] = "error"
-                    catalogue["read"] = [
-                        "api": "AXUIElementCopyAttributeNames", "complete": false,
-                        "issues": [NativeObservationEncoding.issue(AXFactEncoding.status(status))]
-                    ]
+                    nativeProperties.append(.raw([
+                        "key": ["toolkit", "attribute_names"], "value": NSNull(), "state": "error",
+                        "read": [
+                            "api": "AXUIElementCopyAttributeNames", "complete": false,
+                            "issues": [NativeObservationEncoding.issue(AXFactEncoding.status(status))]
+                        ]
+                    ]))
                 }
-                nativeProperties.append(catalogue)
                 // Writable probes use a different API, but their underlying
                 // attribute declaration is still the provider's native name.
-                let names = advertisedFields.map { AXAttributeProfile.writableAttribute($0) ?? $0 }
                 let unavailable = AXFactEncoding.advertisedFieldFailures(
-                    Array(Set(names)), status: status, names: attributes)
-                for name in advertisedFields {
-                    if let failure = unavailable[AXAttributeProfile.writableAttribute(name) ?? name] {
+                    advertisedNames, status: status, names: attributes)
+                for (name, nativeName) in advertised {
+                    if let failure = unavailable[nativeName] {
                         if failure["state"] as? String == "unsupported" {
                             missing[name] = failure
                         } else {
@@ -539,7 +549,7 @@ import ApplicationServices
             if let raw, attributes?.count != keys.count {
                 // A malformed batch cannot be zipped to requested names.
                 // Retain its actual shape separately from per-field failures.
-                nativeProperties.append([
+                nativeProperties.append(.raw([
                     "key": ["toolkit", "attribute_batch"], "arguments": [NativeObservationEncoding.scalar(keys)],
                     "value": try encodeNative(raw),
                     "read": [
@@ -552,7 +562,7 @@ import ApplicationServices
                             ]
                         ]
                     ]
-                ])
+                ]))
             }
             if withinBudget == nil, !batchedRelations.isEmpty {
                 let links = batch.fields.compactMap { field -> (String, AXUIElement)? in
@@ -570,17 +580,17 @@ import ApplicationServices
                 let name = field.name
                 guard acquisition.sampleFields.contains(name) else { continue }
                 if let position = field.batchIndex {
-                    nativeReads[name] = NativeObservationEncoding.batchPropertyRead(owner: nodeID, index: position)
+                    nativeReads[name] = .batch(position)
                 } else if acquisition.prefetched.contains(where: { $0.name == name }) {
-                    nativeReads[name] = ["api": AXSubtreePrefetch.nativeAPI]
+                    nativeReads[name] = .record(["api": AXSubtreePrefetch.nativeAPI])
                 } else {
-                    nativeReads[name] = [
+                    nativeReads[name] = .record([
                         "api": "AXUIElementCopyAttributeValue",
                         "details": NativeObservationEncoding.details([
                             "attribute": name, "native_status": field.status.rawValue,
                             "batch_fallback_status": status.rawValue
                         ])
-                    ]
+                    ])
                 }
                 if field.status == .success, let value = field.value {
                     pendingNativeValues.append((nodes.count, name, value))
@@ -599,9 +609,8 @@ import ApplicationServices
                 if let value = decoded.value { values[name] = value }
                 if let failure = decoded.failure { missing[name] = failure }
             }
-            for name in requested {
+            for (name, attribute) in writableFields {
                 guard missing[name] == nil else { continue }
-                guard let attribute = AXAttributeProfile.writableAttribute(name) else { continue }
                 guard try canRead() else {
                     missing[name] = ["state": "timeout", "detail": "collection time budget"]
                     if withinBudget == nil { reasons.insert("collection time budget") }
@@ -609,12 +618,12 @@ import ApplicationServices
                 }
                 var writable = DarwinBoolean(false)
                 let status = AXUIElementIsAttributeSettable(target.element, attribute as CFString, &writable)
-                nativeReads[name] = [
+                nativeReads[name] = .record([
                     "api": "AXUIElementIsAttributeSettable",
                     "details": NativeObservationEncoding.details([
                         "attribute": attribute, "native_status": status.rawValue
                     ])
-                ]
+                ])
                 if status == .success {
                     values[name] = writable.boolValue
                 } else {
@@ -623,7 +632,7 @@ import ApplicationServices
             }
             if textContent && textCountDeclared {
                 nativeProperties += try AXTextContentReader.read(
-                    target.element, values: values, failures: missing, withinBudget: canRead)
+                    target.element, values: values, failures: missing, withinBudget: canRead).map { .raw($0) }
             }
             for (name, value) in values {
                 guard let text = value as? String else { continue }
@@ -661,14 +670,12 @@ import ApplicationServices
                     let status = AXUIElementCopyActionDescription(target.element, name as CFString, &value)
                     return (status, value)
                 }, encode: encodeNative)
-            let actionFacts = actionRead.facts
-            nativeProperties += actionRead.nativeProperties
-            nodes.append([
-                "node": nodeID, "requestedFields": requested, "values": values, "fieldStatus": missing,
-                "actions": actionFacts, "nativeProperties": nativeProperties, "nativeReads": nativeReads,
-                "nativeRead": NativeObservationEncoding.batchRead(
-                    fields: keys, status: status.rawValue, queried: canReadFields)
-            ])
+            nativeProperties += actionRead.nativeProperties.map { .raw($0) }
+            nodes.append(.init(
+                id: nodeID, requested: requested, values: values, statuses: missing, actions: actionRead.facts,
+                extra: nativeProperties,
+                read: .batch(fields: keys, status: status.rawValue, queried: canReadFields),
+                nativeReads: nativeReads))
 
             return relationFailures
         }
@@ -790,16 +797,14 @@ import ApplicationServices
             } catch is RequestDeadlineExceeded {
                 // Ordinary tree coverage is independent of the optional focus sample.
             } catch let error as DriverError where [.observationIncomplete, .staleTarget].contains(error.code) {}
-            var properties = nodes[0]["nativeProperties"] as? [[String: Any]] ?? []
             let seed = focusRef.map { NativeObservationEncoding.value("AXUIElement", ["ref": $0]) }
                 ?? NativeObservationEncoding.value("CFNull", NSNull())
-            properties.append([
+            nodes[0].extra.append(.raw([
                 "key": ["toolkit", "focused_read_seed"], "value": seed,
                 "read": ["api": "AXUIElementCopyAttributeValue", "complete": focusState != "unavailable",
                          "details": NativeObservationEncoding.details(["attribute": kAXFocusedUIElementAttribute,
                                                                         "source": "application", "state": focusState])]
-            ])
-            nodes[0]["nativeProperties"] = properties
+            ]))
         }
         while index < queue.count, try reading() {
             let (target, nodeID, depth) = queue[index]
@@ -972,7 +977,7 @@ import ApplicationServices
                 links.append(link)
             }
         }
-        let collected = Set(nodes.compactMap { $0["node"] as? String })
+        let collected = Set(nodes.map(\.id))
         for page in pendingLinks {
             var availableEdges = 32768 - edgeCount
             let registration = try relationReader.register(page) { element in
@@ -996,84 +1001,55 @@ import ApplicationServices
         }
         for item in pendingValues {
             let encoded = try encodeField(item.value)
-            // The collector constructs this internal field with the asserted type.
-            // swiftlint:disable:next force_cast
-            var values = nodes[item.index]["values"] as! [String: Any]
-            // The collector constructs this internal field with the asserted type.
-            // swiftlint:disable:next force_cast
-            var missing = nodes[item.index]["fieldStatus"] as! [String: Any]
-            if let value = encoded.value { values[item.property] = value }
-            if let failure = encoded.failure { missing[item.property] = failure }
-            nodes[item.index]["values"] = values
-            nodes[item.index]["fieldStatus"] = missing
+            if let value = encoded.value { nodes[item.index].values[item.property] = value }
+            if let failure = encoded.failure { nodes[item.index].statuses[item.property] = failure }
         }
         for item in pendingNativeValues {
             // Immutable text previews remain bounded; their read issue carries
             // the captured full text token and native UTF-16 count.
-            // The collector constructs this internal field with the asserted type.
-            // swiftlint:disable:next force_cast
-            let statuses = nodes[item.index]["fieldStatus"] as! [String: [String: Any]]
-            // The collector constructs this internal field with the asserted type.
-            // swiftlint:disable:next force_cast
-            let values = nodes[item.index]["values"] as! [String: Any]
             let raw =
-                statuses[item.property]?["state"] as? String == "truncated"
-                ? values[item.property]! as CFTypeRef : item.value
+                nodes[item.index].statuses[item.property]?["state"] as? String == "truncated"
+                ? nodes[item.index].values[item.property]! as CFTypeRef : item.value
             do {
-                let encoded = try encodeNative(raw)
-                var native = nodes[item.index]["nativeValues"] as? [String: [String: Any]] ?? [:]
-                // The collector constructs this internal field with the asserted type.
-                // swiftlint:disable:next force_cast
-                var missing = nodes[item.index]["fieldStatus"] as! [String: [String: Any]]
-                if encoded["nativeType"] as? String == "AXValue.AXError", var status = missing[item.property] {
+                let encoded = try nativeEncoder.encodeCollected(raw, reference: nativeReference)
+                if case .record(let value) = encoded, value["nativeType"] as? String == "AXValue.AXError",
+                    var status = nodes[item.index].statuses[item.property]
+                {
                     // AX batch success can contain an AXError value for one
                     // slot. Keep that wrapper as error evidence, not a value.
-                    status["wrappedNativeValue"] = encoded
-                    missing[item.property] = status
+                    status["wrappedNativeValue"] = value
+                    nodes[item.index].statuses[item.property] = status
                 } else {
-                    native[item.property] = encoded
-                    if missing[item.property]?["detail"] as? String
+                    nodes[item.index].nativeValues[item.property] = encoded
+                    if nodes[item.index].statuses[item.property]?["detail"] as? String
                         == "native property type is not representable in this field profile"
                     {
-                        missing.removeValue(forKey: item.property)
+                        nodes[item.index].statuses.removeValue(forKey: item.property)
                     }
                 }
-                nodes[item.index]["fieldStatus"] = missing
-                nodes[item.index]["nativeValues"] = native
             } catch {
                 if error is CancellationError { throw error }
                 // The raw field's own value/error remains in its local record;
                 // losing a nested object registration is an explicit gap.
-                // The collector constructs this internal field with the asserted type.
-                // swiftlint:disable:next force_cast
-                var missing = nodes[item.index]["fieldStatus"] as! [String: Any]
-                missing[item.property] = ["state": "error", "detail": String(describing: error)]
-                nodes[item.index]["fieldStatus"] = missing
+                nodes[item.index].statuses[item.property] = ["state": "error", "detail": String(describing: error)]
             }
         }
-        for item in pendingDeclarations {
-            // The collector constructs this internal field with the asserted type.
-            // swiftlint:disable:next force_cast
-            var missing = nodes[item.index]["fieldStatus"] as! [String: [String: Any]]
-            if missing[item.property] == nil {
-                missing[item.property] = item.issue
-                nodes[item.index]["fieldStatus"] = missing
-            }
+        for item in pendingDeclarations where nodes[item.index].statuses[item.property] == nil {
+            nodes[item.index].statuses[item.property] = item.issue
         }
         relationReader.retainAvailableCursors(&links)
         guard !nodes.isEmpty else { throw RequestDeadlineExceeded() }
         var unread = Set(known.values).subtracting(collected)
         if let detached, !collected.contains(detached.parent) { unread.insert(detached.parent) }
-        return [
-            "kind": "nodes", "session": session, "surface": root.scope, "platform": "macos", "observed": stamp(began),
-            "roots": [ref], "nodes": nodes, "requestedRelations": relations, "relations": links,
-            "unread": unread.sorted(), "stopReasons": reasons.sorted(),
-            "nativeResources": nativeEncoder.resources
-        ]
+        return .init(
+            session: session, surface: root.scope, stamp: stamp(began), roots: [ref], nodes: nodes, relations: links,
+            requestedRelations: relations, unread: unread.sorted(), stopReasons: reasons.sorted(),
+            nativeResources: nativeEncoder.resources)
     }
 
-    func relation(_ ref: String, session: String, property: String, cursor: String?, limit: Int) throws -> [String: Any]
-    {
+    func relation(
+        _ ref: String, session: String, property: String, cursor: String?, limit: Int
+    ) throws -> NativeCollectedObservation {
         var root = try readTarget(ref)
         root.contextComplete = root.role == kAXWindowRole
         let began = Int64(Date().timeIntervalSince1970 * 1000)
@@ -1118,10 +1094,9 @@ import ApplicationServices
             }
             link = relationReader.encode(page, registration: registration)
         }
-        return [
-            "kind": "relation", "session": session, "surface": root.scope, "platform": "macos",
-            "observed": stamp(began), "relation": link, "unread": rawReferences.sorted(),
-            "nativeResources": nativeEncoder.resources
-        ]
+        return .init(
+            session: session, surface: root.scope, stamp: stamp(began),
+            roots: (link["source"] as? String).map { [$0] } ?? [], relations: [link],
+            unread: rawReferences.sorted(), nativeResources: nativeEncoder.resources)
     }
 }

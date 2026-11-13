@@ -3,7 +3,7 @@
 //! A read retains one fact owner and one index of native identities across its
 //! acquisition, preview, and formally numbered presentation.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::{Arc, OnceLock}};
 
 use super::{
     capabilities::{operation_capabilities, input_containers},
@@ -12,7 +12,7 @@ use super::{
     numbering::{acquisition_aliases, NodeId, NumberingError, Part, PartAliases, SessionAliases},
     projection::{branch_members, recursion::ProjectionBudget, BranchError, CompressionEvidence, Projection, ProjectionError, ProjectionEvent, ProjectionOptions},
     render::fallback::{FailureStage, PresentationFailure},
-    semantic::{self, ReadError},
+    semantic::{self, ProjectionSources, ReadError},
     value::{SemanticTree, Value},
     wire::{self, WireError},
 };
@@ -53,8 +53,11 @@ pub(crate) struct ReadCapture {
     surface: Option<String>,
     scope_kind: Option<String>,
     tokens: Vec<String>,
+    ordinals: HashMap<String, NodeId>,
     source_order: Vec<NodeId>,
     features: Vec<String>,
+    geometry: OnceLock<Arc<Geometry>>,
+    projection_sources: ProjectionSources,
 }
 
 pub(crate) struct PreparedCapture {
@@ -62,7 +65,7 @@ pub(crate) struct PreparedCapture {
     pub(crate) options: ProjectionOptions,
     pub(crate) semantic: Arc<SemanticTree>,
     pub(crate) branches: Vec<PreparedBranch>,
-    pub(crate) geometry: Geometry,
+    pub(crate) geometry: Arc<Geometry>,
     pub(crate) evidence: CompressionEvidence,
 }
 
@@ -195,13 +198,18 @@ impl ReadCapture {
         };
         let native = snapshot.observation.get("nodes").and_then(Value::as_map)
             .ok_or(CaptureError::Invalid("missing native nodes"))?;
-        let ordinal: HashMap<_, _> = native.iter().enumerate()
-            .map(|(index, (name, _))| (name.as_str(), NodeId(index))).collect();
+        let ordinals: HashMap<_, _> = native.iter().enumerate()
+            .map(|(index, (name, _))| (name.clone(), NodeId(index))).collect();
         let source_order = semantic::source_order(&snapshot)?.into_iter()
-            .map(|name| ordinal.get(name).copied().ok_or(CaptureError::Invalid("unknown native identity")))
+            .map(|name| ordinals.get(name).copied().ok_or(CaptureError::Invalid("unknown native identity")))
             .collect::<Result<_, _>>()?;
         let tokens = native.iter().map(|(name, _)| name.clone()).collect();
-        Ok(Arc::new(Self { snapshot, session, surface, scope_kind, tokens, source_order, features }))
+        let projection_sources = ProjectionSources::new(&snapshot, &ordinals);
+        Ok(Arc::new(Self {
+            snapshot, session, surface, scope_kind, tokens, ordinals, source_order, features,
+            geometry: OnceLock::new(),
+            projection_sources,
+        }))
     }
 
     pub(crate) fn part(&self) -> Part<'_> {
@@ -225,10 +233,14 @@ impl ReadCapture {
     pub(crate) fn project(&self, aliases: &PartAliases) -> Result<SemanticTree, CaptureError> {
         let scope = self.scope_kind.clone().map_or(Value::Null, Value::Text);
         let features = Value::Seq(self.features.iter().cloned().map(Value::Text).collect());
-        Ok(semantic::project_numbered(&self.snapshot, &self.tokens, aliases, &scope, &features)?.into())
+        Ok(semantic::project_numbered(
+            &self.snapshot, &self.part(), &self.ordinals, &self.projection_sources, aliases, &scope, &features,
+        )?.into())
     }
 
-    pub(crate) fn geometry(&self) -> Geometry { collect_geometry(&self.snapshot.observation) }
+    pub(crate) fn geometry(&self) -> &Arc<Geometry> {
+        self.geometry.get_or_init(|| Arc::new(collect_geometry(&self.snapshot.observation)))
+    }
 
     pub(crate) fn tokens(&self) -> &[String] { &self.tokens }
 
@@ -253,7 +265,7 @@ impl ReadCapture {
         let ids = self.display_index(aliases);
         let evidence = CompressionEvidence::capture(&self.snapshot, &semantic, &ids)
             .map_err(CaptureError::from).map_err(E::from)?;
-        let geometry = self.geometry();
+        let geometry = Arc::clone(self.geometry());
         let roots = semantic.get("roots").and_then(Value::as_seq)
             .ok_or(CaptureError::Invalid("missing semantic roots"))?;
         let mut branches = Vec::with_capacity(roots.len());
@@ -296,7 +308,6 @@ impl ReadCapture {
             .ok_or(CaptureError::Invalid("missing semantic roots"))?;
         let options = ProjectionOptions { compact: true, recursion, ..ProjectionOptions::default() };
         let mut evidence = None;
-        let mut geometry = None;
         let mut order = Vec::new();
         for root in roots {
             let members = match branch_members(root, &ids, &mut checkpoint) {
@@ -308,7 +319,7 @@ impl ReadCapture {
             // Legacy numbering uses the uncompressed source order for a branch
             // whose presentation fails, then continues with any later branches.
             let projected = evidence.as_ref().map_err(Clone::clone).and_then(|evidence| {
-                self.project_preview_root(root, &ids, options.clone(), evidence, &mut geometry, trace.as_deref_mut())
+                self.project_preview_root(root, &ids, options.clone(), evidence, trace.as_deref_mut())
             }).and_then(|projection| projection.visible_order());
             let visible = match projected {
                 Ok(visible) => visible,
@@ -326,7 +337,7 @@ impl ReadCapture {
 
     fn project_preview_root(
         &self, root: &Value, ids: &HashMap<String, NodeId>, options: ProjectionOptions,
-        evidence: &CompressionEvidence, geometry: &mut Option<Geometry>, mut trace: Option<&mut Vec<ProjectionEvent>>,
+        evidence: &CompressionEvidence, mut trace: Option<&mut Vec<ProjectionEvent>>,
     ) -> Result<Projection, ProjectionError> {
         ProjectionEvent::scope(&mut trace, "PresentationPipeline", |trace| {
             let (input, geometry) = ProjectionEvent::scope(trace, "SemanticPipeline", |trace| {
@@ -337,7 +348,7 @@ impl ReadCapture {
                     Projection::build_projection_input(semantic, ids, options)
                 })?;
                 let geometry = ProjectionEvent::scope(trace, "collect_geometry", |_| {
-                    Ok(&*geometry.get_or_insert_with(|| self.geometry()))
+                    Ok(self.geometry())
                 })?;
                 Ok((input, geometry))
             })?;

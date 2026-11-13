@@ -66,7 +66,7 @@ import ApplicationServices
         childrenPage: NativeInspectQuery.ChildrenPage? = nil, relationPage: NativeInspectQuery.RelationPage? = nil,
         advertisedFields: [String] = [], followRelations: [String] = [], textContent: Bool = false,
         actionDetail: NativeActionDetail = .full, focusedElement: Bool = false
-    ) throws -> [String: Any] {
+    ) throws -> NativeCollectedObservation {
         try facts.collect(
             ref, session: session, fields: fields, maxNodes: maxNodes, maxDepth: maxDepth, childrenPage: childrenPage,
             relationPage: relationPage, advertisedFields: advertisedFields, followRelations: followRelations,
@@ -76,7 +76,7 @@ import ApplicationServices
     func nativeReadTarget(_ ref: String) throws -> ApplicationElements.Target { try facts.readTarget(ref) }
 
     func nativeRelation(_ ref: String, session: String, property: String, cursor: String?, limit: Int) throws
-        -> [String: Any]
+        -> NativeCollectedObservation
     { try facts.relation(ref, session: session, property: property, cursor: cursor, limit: limit) }
 
     func registerNativeRoot(_ element: AXUIElement, app: NSRunningApplication, scope: String) throws -> String {

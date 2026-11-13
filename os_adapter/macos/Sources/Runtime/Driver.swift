@@ -58,13 +58,27 @@ import CoreGraphics
         }
     }
 
+    private func send(_ id: Int64, _ data: Data, remember: Bool) throws {
+        if remember { ledger.finish(id: id, response: data) }
+        try FileHandle.standardOutput.write(contentsOf: data)
+    }
+
     private func reply(_ id: Int64, _ payload: [String: Any], remember: Bool = false) {
-        let value = payload.merging(["version": wireVersion, "session": session, "id": id]) { _, envelope in envelope }
         do {
+            let value = payload.merging(["version": wireVersion, "session": session, "id": id]) { _, envelope in envelope }
             var data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed])
             data.append(10)
-            if remember { ledger.finish(id: id, response: data) }
-            try FileHandle.standardOutput.write(contentsOf: data)
+            try send(id, data, remember: remember)
+        } catch { shutdown(code: 1) }
+    }
+
+    private func reply(_ id: Int64, observation: NativeObservationEncoding.Publication) {
+        do {
+            if let line = NativeObservationLine.encode(observation, id: id, session: session, version: wireVersion) {
+                try send(id, line, remember: true)
+            } else {
+                reply(id, ["result": observation.record()], remember: true)
+            }
         } catch { shutdown(code: 1) }
     }
 
@@ -269,10 +283,17 @@ import CoreGraphics
             let result = try await native.perform(method, raw["params"], timeoutMs: remaining)
             // A returned execute receipt may still describe failure. Metrics
             // report that failure, never an application-effect confirmation.
-            if result["errorCode"] is String || (result["cleanup"] as? String).map({ $0 != "complete" }) == true {
+            if case .fields(let fields) = result,
+                fields["errorCode"] is String || (fields["cleanup"] as? String).map({ $0 != "complete" }) == true
+            {
                 status = "error"
             }
-            if !requests.stopping { reply(id, ["result": result], remember: true) }
+            if !requests.stopping {
+                switch result {
+                case .fields(let fields): reply(id, ["result": fields], remember: true)
+                case .observation(let observation): reply(id, observation: observation)
+                }
+            }
 
         } catch {
             status = "error"

@@ -86,7 +86,13 @@ namespace ComputerUse.Windows
                         response["pointerCheckpoint"] = pointerCheckpoint();
                 }
             }
-            string line = Wire.Json(response);
+            object result;
+            NativeObservationGraph.Publication observation = null;
+            if (response.TryGetValue("result", out result))
+                observation = result as NativeObservationGraph.Publication;
+            if (observation != null)
+                response["result"] = observation.Graph;
+            string line = observation == null ? Wire.Json(response) : observation.Reply(response);
 
             lock (gate)
             {

@@ -26,14 +26,95 @@ import ApplicationServices
 /// Object registration is supplied by acquisition and never implies parentage.
 @MainActor final class AXNativeValueEncoding {
     typealias Record = [String: Any]
+    typealias CapturedValue = NativeObservationEncoding.CapturedValue
     private let retained: AXNativeValueResources
     private(set) var resources = [Record]()
 
     init(resources: AXNativeValueResources = AXNativeValueResources()) { retained = resources }
 
     func encode(_ raw: CFTypeRef, reference: (AXUIElement) throws -> String) throws -> Record {
+        try encodeCollected(raw, reference: reference).materialize()
+    }
+
+    func encodeCollected(_ raw: CFTypeRef, reference: (AXUIElement) throws -> String) throws -> CapturedValue {
+        try Task.checkCancellation()
+        return try encodeCaptured(raw, type: CFGetTypeID(raw), reference: reference)
+    }
+
+    private func encodeCaptured(
+        _ raw: CFTypeRef, type: CFTypeID, reference: (AXUIElement) throws -> String
+    ) throws -> CapturedValue {
+        if type == CFNullGetTypeID() { return .null }
+        if type == CFBooleanGetTypeID() {
+            // CFGetTypeID establishes the bridged native type before this conversion.
+            // swiftlint:disable:next force_cast
+            return .boolean((raw as! NSNumber).boolValue)
+        }
+        if type == CFStringGetTypeID() { return string(unsafeDowncast(raw, to: CFString.self)) }
+        if type == AXValueGetTypeID() { return axValue(unsafeDowncast(raw, to: AXValue.self)) }
+        return try .record(encodeOther(raw, type: type, reference: reference))
+    }
+
+    func encodeAttributeCatalogue(
+        _ raw: CFArray, reference: (AXUIElement) throws -> String
+    ) throws -> NativeCollectedObservation.NativeProperty {
         try Task.checkCancellation()
         let type = CFGetTypeID(raw)
+        guard type == CFArrayGetTypeID() else {
+            let value = try encodeCaptured(raw, type: type, reference: reference).materialize()
+            return .raw(NativeObservationEncoding.catalogueProperty(value))
+        }
+        // Match the collection representation used by generic CFArray encoding.
+        // swiftlint:disable:next force_cast
+        let array = raw as! [Any]
+        var names = [String]()
+        names.reserveCapacity(array.count)
+        var mixed: [Record]?
+        for item in array {
+            let rawItem = item as CFTypeRef
+            try Task.checkCancellation()
+            let type = CFGetTypeID(rawItem)
+            if type == CFStringGetTypeID() {
+                let source = unsafeDowncast(rawItem, to: CFString.self)
+                let text = source as String
+                if Self.matchesASCII(source, text: text) {
+                    if mixed != nil {
+                        mixed!.append(NativeObservationEncoding.value("CFString", text))
+                    } else {
+                        names.append(text)
+                    }
+                    continue
+                }
+            }
+            if mixed == nil { mixed = names.map { NativeObservationEncoding.value("CFString", $0) } }
+            mixed!.append(try encodeCaptured(rawItem, type: type, reference: reference).materialize())
+        }
+        if let mixed {
+            let value = NativeObservationEncoding.value("CFArray", ["items": mixed])
+            return .raw(NativeObservationEncoding.catalogueProperty(value))
+        }
+        return .catalogue(names)
+    }
+
+    private static func matchesASCII(_ raw: CFString, text: String) -> Bool {
+        let length = CFStringGetLength(raw)
+        if let direct = CFStringGetCStringPtr(raw, CFStringBuiltInEncodings.ASCII.rawValue),
+            length == text.utf8.count, text.utf8.withContiguousStorageIfAvailable({ bytes in
+                bytes.isEmpty || memcmp(direct, bytes.baseAddress!, length) == 0
+            }) == true
+        {
+            return true
+        }
+        guard length <= 128, text.utf8.count == length, text.utf8.allSatisfy({ $0 < 128 }) else { return false }
+        return withUnsafeTemporaryAllocation(of: UInt16.self, capacity: length) { storage in
+            if length > 0 { CFStringGetCharacters(raw, CFRange(location: 0, length: length), storage.baseAddress!) }
+            return text.utf16.elementsEqual(storage)
+        }
+    }
+
+    private func encodeOther(
+        _ raw: CFTypeRef, type: CFTypeID, reference: (AXUIElement) throws -> String
+    ) throws -> Record {
         if type == AXUIElementGetTypeID() {
             do {
                 return NativeObservationEncoding.value(
@@ -48,12 +129,6 @@ import ApplicationServices
                     issue: ["reason": "native_reference_unavailable", "detail": String(describing: error)])
             }
         }
-        if type == CFNullGetTypeID() { return NativeObservationEncoding.value("CFNull", NSNull()) }
-        if type == CFBooleanGetTypeID() {
-            // CFGetTypeID establishes the bridged native type before this conversion.
-            // swiftlint:disable:next force_cast
-            return NativeObservationEncoding.value("CFBoolean", (raw as! NSNumber).boolValue)
-        }
         if type == CFNumberGetTypeID() {
             let number = unsafeDowncast(raw, to: CFNumber.self)
             let name = "CFNumber." + String(CFNumberGetType(number).rawValue)
@@ -65,7 +140,6 @@ import ApplicationServices
                 CFNumberIsFloatType(number)
                     ? NativeObservationEncoding.floating(scalar.doubleValue) : ["integer": scalar.stringValue])
         }
-        if type == CFStringGetTypeID() { return string(unsafeDowncast(raw, to: CFString.self)) }
         if type == CFDataGetTypeID() {
             // CFGetTypeID establishes the bridged native type before this conversion.
             // swiftlint:disable:next force_cast
@@ -89,7 +163,6 @@ import ApplicationServices
                     ["unit", NativeObservationEncoding.value("CFString", "second")]
                 ])
         }
-        if type == AXValueGetTypeID() { return axValue(unsafeDowncast(raw, to: AXValue.self)) }
         if type == CFArrayGetTypeID() {
             // CFGetTypeID establishes the bridged native type before this conversion.
             // swiftlint:disable:next force_cast
@@ -134,7 +207,7 @@ import ApplicationServices
                 "CFAttributedString",
                 [
                     "fields": [
-                        ["text", string(CFAttributedStringGetString(text)!)],
+                        ["text", string(CFAttributedStringGetString(text)!).materialize()],
                         ["runs", NativeObservationEncoding.value("CFArray", ["items": runs])]
                     ]
                 ])
@@ -198,17 +271,16 @@ import ApplicationServices
         scan(node)
     }
 
-    private func string(_ raw: CFString) -> Record {
+    private func string(_ raw: CFString) -> CapturedValue {
         let text = raw as String
-        var value = NativeObservationEncoding.value("CFString", text)
         var original = [UInt16](repeating: 0, count: CFStringGetLength(raw))
         CFStringGetCharacters(raw, CFRange(location: 0, length: original.count), &original)
-        if original != Array(text.utf16) {
-            let bytes = original.flatMap { [UInt8(truncatingIfNeeded: $0), UInt8(truncatingIfNeeded: $0 >> 8)] }
-            value["raw"] = Data(bytes).base64EncodedString()
-            value["metadata"] = [["raw_encoding", NativeObservationEncoding.value("CFString", "utf-16-le")]]
-        }
-        return value
+        if text.utf16.elementsEqual(original) { return .string(text) }
+        var value = NativeObservationEncoding.value("CFString", text)
+        let bytes = original.flatMap { [UInt8(truncatingIfNeeded: $0), UInt8(truncatingIfNeeded: $0 >> 8)] }
+        value["raw"] = Data(bytes).base64EncodedString()
+        value["metadata"] = [["raw_encoding", NativeObservationEncoding.value("CFString", "utf-16-le")]]
+        return .record(value)
     }
 
     private func span(_ range: CFRange, nativeType: String = "AXValue.CFRange", unit: String = "native_cf_range")
@@ -224,51 +296,43 @@ import ApplicationServices
             ], metadata: [["index_unit", NativeObservationEncoding.value("CFString", unit)]])
     }
 
-    private func axValue(_ raw: AXValue) -> Record {
+    private func axValue(_ raw: AXValue) -> CapturedValue {
         func number(_ value: CGFloat) -> Record {
             NativeObservationEncoding.value("CGFloat", NativeObservationEncoding.floating(Double(value)))
         }
-        let geometry: [[Any]] = [
-            ["coordinate_space", NativeObservationEncoding.value("CFString", "macos.ax.global_screen")],
-            ["unit", NativeObservationEncoding.value("CFString", "point")],
-            ["coordinate_metadata_source", NativeObservationEncoding.value("CFString", "api_contract")]
-        ]
         switch AXValueGetType(raw) {
         case .cgPoint:
             var point = CGPoint.zero
             if AXValueGetValue(raw, .cgPoint, &point) {
-                return NativeObservationEncoding.value(
-                    "AXValue.CGPoint", ["fields": [["x", number(point.x)], ["y", number(point.y)]]], metadata: geometry)
+                return .point(Double(point.x), Double(point.y))
             }
         case .cgSize:
             var size = CGSize.zero
             if AXValueGetValue(raw, .cgSize, &size) {
-                return NativeObservationEncoding.value(
-                    "AXValue.CGSize", ["fields": [["width", number(size.width)], ["height", number(size.height)]]],
-                    metadata: geometry.filter { $0[0] as? String != "coordinate_space" })
+                return .size(Double(size.width), Double(size.height))
             }
         case .cgRect:
             var rect = CGRect.zero
             if AXValueGetValue(raw, .cgRect, &rect) {
-                return NativeObservationEncoding.value(
+                return .record(NativeObservationEncoding.value(
                     "AXValue.CGRect",
                     [
                         "fields": [
                             ["x", number(rect.origin.x)], ["y", number(rect.origin.y)],
                             ["width", number(rect.size.width)], ["height", number(rect.size.height)]
                         ]
-                    ], metadata: geometry)
+                    ], metadata: CapturedValue.screenRecords))
             }
         case .cfRange:
             var range = CFRange()
-            if AXValueGetValue(raw, .cfRange, &range) { return span(range) }
+            if AXValueGetValue(raw, .cfRange, &range) { return .record(span(range)) }
         case .axError:
             var error = AXError.failure
             if AXValueGetValue(raw, .axError, &error) {
-                return NativeObservationEncoding.value("AXValue.AXError", error.rawValue)
+                return .record(NativeObservationEncoding.value("AXValue.AXError", error.rawValue))
             }
         default: break
         }
-        return resource(raw, kind: "native_value", name: "AXValue.\(AXValueGetType(raw).rawValue)", identity: nil)
+        return .record(resource(raw, kind: "native_value", name: "AXValue.\(AXValueGetType(raw).rawValue)", identity: nil))
     }
 }

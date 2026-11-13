@@ -38,7 +38,7 @@ from computer_use.client.images import (
     require_image_delivery,
 )
 from computer_use.client.result_presentation import result_receipt, text_source_label
-from computer_use.diagnostics import _register_observation_diagnostic
+from computer_use.diagnostics import _register_observation_diagnostic, _register_pipeline_transport
 from computer_use.errors import ComputerUseError, confirmed_no_requested_input
 from computer_use.identity import Record, WeakIdentityMap
 from computer_use.interaction.read.presentation.actions.presentation import ActionPresentation
@@ -61,7 +61,7 @@ from .image_delivery import prepare_image, project_document
 from .image_presentation import PresentationImages
 from .output import ObservationOutput, ObservationPresenter, OutputBuffer
 from .worker_lifecycle import READY_ENV
-from .worker_transport import WorkerMessageWriter, consume_protocol, read_message
+from .worker_transport import PIPELINE_TAG_ENV, WorkerMessageWriter, consume_protocol, read_message
 
 _runs = ContextVar("computer_use_execution", default=None)
 
@@ -81,9 +81,10 @@ def _receipt_summary(receipt):
 
 
 class Runtime:
-    def __init__(self, send, computer_factory=Computer, *, send_observation=None):
+    def __init__(self, send, computer_factory=Computer, *, send_observation=None, send_pipeline=None):
         self.send, self.computer_factory = send, computer_factory
         self.send_observation = send_observation
+        self.send_pipeline = send_pipeline
         self.executor = SessionExecutor(loop=asyncio.get_running_loop())
         self.presenter = ObservationPresenter()
         self.presentation_images = PresentationImages()
@@ -98,6 +99,8 @@ class Runtime:
         set_diagnostic_handler(handler)
         if send_observation is not None:
             _register_observation_diagnostic(handler, handler)
+        if send_pipeline is not None:
+            _register_pipeline_transport(handler, self.pipeline_transport)
         set_action_handler(self.action)
         set_text_page_handler(self.text_page)
         set_observation_handler(self.observation)
@@ -124,6 +127,13 @@ class Runtime:
                 pending.set_result(None)
 
         return done
+
+    def pipeline_transport(self, event):
+        """Send primitive traces only in the ordinary diagnostic owner context."""
+        if not self.executor.is_owner:
+            return False
+        run = _runs.get()
+        return self.send_pipeline(event, run["id"] if run is not None else None)
 
     def diagnostic(self, event, observation_json=None):
         if not self.executor.is_owner:
@@ -931,12 +941,17 @@ async def main(argv=None):
 
     protocol = consume_protocol()
     ready_requested = os.environ.pop(READY_ENV, None) == "1"
+    canonical_pipeline = os.environ.pop(PIPELINE_TAG_ENV, None) == "1"
     reader, writer = await worker_connection()
 
-    messages = WorkerMessageWriter(writer, protocol=protocol)
+    messages = WorkerMessageWriter(writer, protocol=protocol, canonical_pipeline=canonical_pipeline)
     if not args.allow_global_input:
         disable_global_input_for_process()
-    runtime = Runtime(messages.send, send_observation=messages.send_observation)
+    runtime = Runtime(
+        messages.send,
+        send_observation=messages.send_observation,
+        send_pipeline=messages.send_pipeline if canonical_pipeline else None,
+    )
     sys.stdout = sys.stderr = ConsoleWriter(runtime)
     builtins.print = runtime.print
     if ready_requested:

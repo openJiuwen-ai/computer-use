@@ -92,25 +92,34 @@ class Journal:
             self._error = str(error)
 
     def record(self, event):
+        self._record(event, None, 0)
+
+    def record_pipeline(self, line, byte_count):
+        """Append a validated trace through the ordinary ordered journal batch."""
+        self._record(None, line, byte_count)
+
+    def _record(self, event, line, byte_count):
         if self._error is not None:
             return
         try:
-            line = dumps({"timestamp": now(), **event}) + "\n"
-            if event.get("kind") == "pipeline":
-                try:
-                    loop = get_running_loop()
-                except RuntimeError:
+            if line is None:
+                line = dumps({"timestamp": now(), **event}) + "\n"
+                if event.get("kind") != "pipeline":
+                    # Publish prior traces before progress, outputs or execution_end.
                     self.flush(line)
                     return
-                self._pending.append(line)
-                self._pending_bytes += len(line.encode("utf-8", "backslashreplace"))
-                if self._pending_bytes >= 64 * 1024:
-                    self.flush()
-                elif self._scheduled is None:
-                    self._scheduled = loop.call_soon(self.flush)
-            else:
-                # Progress, outputs and execution_end publish every prior trace.
+                byte_count = len(line.encode("utf-8", "backslashreplace"))
+            try:
+                loop = get_running_loop()
+            except RuntimeError:
                 self.flush(line)
+                return
+            self._pending.append(line)
+            self._pending_bytes += byte_count
+            if self._pending_bytes >= 64 * 1024:
+                self.flush()
+            elif self._scheduled is None:
+                self._scheduled = loop.call_soon(self.flush)
         except Exception as error:
             self._error = str(error)
 

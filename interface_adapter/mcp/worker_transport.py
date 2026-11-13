@@ -16,12 +16,15 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import socket
 from asyncio import IncompleteReadError, get_running_loop
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from computer_use.diagnostics import _pipeline_timestamp
 from computer_use.json import loads
+from computer_use.pipeline.core import Effect, Event
 
 from .diagnostics import dumps
 
@@ -29,10 +32,30 @@ MAX_MESSAGE_BYTES = 128 * 1024 * 1024
 HEADER_BYTES = 4
 DIAGNOSTIC_BATCH_BYTES = 64 * 1024
 PROTOCOL_ENV = "COMPUTER_USE_WORKER_PROTOCOL"
+PIPELINE_TAG_ENV = "COMPUTER_USE_WORKER_PIPELINE_TAG"
 FRAMED_PROTOCOL = "framed-v2"
 _OBSERVATION_FRAME = b"\x00"
 _DIGEST_BYTES = 32
 _MAX_DIAGNOSTIC_HEADER_BYTES = 64 * 1024
+# The frame's capped size leaves its highest bit free. Only the worker's
+# canonical trace encoder sets it, without changing admission or batch sizes.
+_PIPELINE_TAG = 1 << 31
+_PIPELINE_ENVELOPE = b'{"diagnostic":'
+_PIPELINE_TIMESTAMP = _PIPELINE_ENVELOPE + b'{"timestamp":'
+_TIMESTAMP_START = len(_PIPELINE_TIMESTAMP)
+_TIMESTAMP_END = _TIMESTAMP_START + 26  # Quoted UTC timestamp with millisecond precision.
+_TIMESTAMP_PATTERN = re.compile(rb'"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z"')
+_JOURNAL_TIMESTAMP = _PIPELINE_TIMESTAMP[len(_PIPELINE_ENVELOPE):].decode("ascii")
+_JOURNAL_SUFFIX_START = _TIMESTAMP_END - len(_PIPELINE_ENVELOPE)
+_PIPELINE_MEMO_LIMIT = 512
+_PIPELINE_MEMO_PAYLOAD_BYTES = 4096
+_PIPELINE_FIELDS = (
+    "timestamp", "kind", "callId", "path", "phase", "effects", "attempt", "branch", "cleanup", "dispatch", "errorType"
+)
+_PIPELINE_ENCODER = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+_NONE_TYPE = type(None)
+_FAST_PIPELINE_START = HEADER_BYTES + _TIMESTAMP_START
+_FAST_PIPELINE_END = HEADER_BYTES + _TIMESTAMP_END
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +65,105 @@ class EncodedObservationDiagnostic:
     event: MappingProxyType
     header_json: bytes
     result_json: memoryview
+
+
+@dataclass(frozen=True, slots=True)
+class EncodedPipelineDiagnostic:
+    """One validated standard trace ready for the journal's existing batch."""
+
+    line: str
+    byte_count: int
+
+
+def _canonical_trace_field(value):
+    kind = type(value)
+    return (
+        value is None
+        or kind in (bool, int, str)
+        or kind is list and all(type(part) is str for part in value)
+    )
+
+
+def _canonical_pipeline_message(message):
+    event = message.get("diagnostic")
+    if (
+        type(message) is not dict
+        or type(event) is not dict
+        or tuple(message) not in (("diagnostic",), ("diagnostic", "executionId"))
+        or tuple(event) != _PIPELINE_FIELDS
+        or any(type(key) is not str for key in (*message, *event))
+        or not all(_canonical_trace_field(value) for value in event.values())
+    ):
+        return None
+    execution_id = message.get("executionId")
+    if execution_id is not None and (type(execution_id) is not int or execution_id <= 0):
+        return None
+    try:
+        # Strict encoding rejects surrogate code units, which require the
+        # existing compatibility encoder and normal journal serialization.
+        payload = _PIPELINE_ENCODER.encode(message).encode("utf-8")
+    except (TypeError, ValueError):
+        return None
+    if not _TIMESTAMP_PATTERN.fullmatch(payload, _TIMESTAMP_START, _TIMESTAMP_END):
+        return None
+    return payload
+
+
+def _pipeline_message(event, timestamp, execution_id):
+    record = {
+        "timestamp": timestamp,
+        "kind": "pipeline",
+        "callId": event.call_id,
+        "path": list(event.path),
+        "phase": event.phase,
+        "effects": sorted(effect.value for effect in event.effects),
+        "attempt": event.attempt,
+        "branch": event.branch,
+        "cleanup": event.cleanup,
+        "dispatch": event.dispatch,
+        "errorType": event.error_type,
+    }
+    message = {"diagnostic": record}
+    if execution_id is not None:
+        message["executionId"] = execution_id
+    return message
+
+
+def _encoded_pipeline_diagnostic(payload, message):
+    event = message.get("diagnostic")
+    if (
+        not payload.startswith(_PIPELINE_TIMESTAMP)
+        or not _TIMESTAMP_PATTERN.fullmatch(payload, _TIMESTAMP_START, _TIMESTAMP_END)
+        or b"\n" in payload
+        or b"\r" in payload
+        or not isinstance(event, dict)
+        or event.get("kind") != "pipeline"
+        or tuple(event) != _PIPELINE_FIELDS
+        or not all(_canonical_trace_field(value) for value in event.values())
+    ):
+        raise ValueError("Invalid canonical pipeline diagnostic.")
+
+    execution_id = message.get("executionId")
+    if execution_id is None:
+        suffix = b',"executionId":null}'
+    elif type(execution_id) is int and execution_id > 0:
+        suffix = b',"executionId":' + str(execution_id).encode("ascii") + b"}"
+    else:
+        raise ValueError("Invalid canonical pipeline execution ID.")
+    if "executionId" in message:
+        if len(message) != 2 or not payload.endswith(suffix):
+            raise ValueError("Invalid canonical pipeline diagnostic envelope.")
+        event_end = len(payload) - len(suffix)
+    else:
+        if len(message) != 1 or not payload.endswith(b"}}"):
+            raise ValueError("Invalid canonical pipeline diagnostic envelope.")
+        event_end = len(payload) - 1
+    if payload[event_end - 1] != ord("}"):
+        raise ValueError("Invalid canonical pipeline diagnostic envelope.")
+    # The private tag comes only from the canonical encoder. Move its
+    # execution ID into the journal envelope without repeating serialization.
+    line = b"".join((memoryview(payload)[len(_PIPELINE_ENVELOPE) : event_end - 1], suffix, b"\n"))
+    return EncodedPipelineDiagnostic(line.decode("utf-8"), len(line))
 
 
 def _validate_observation_header(event):
@@ -98,7 +220,7 @@ def _observation_payload(message, observation_json=None):
     digest = hashlib.sha256(header_size)
     digest.update(header_json)
     digest.update(result_json)
-    return _OBSERVATION_FRAME + digest.digest() + header_size + header_json + result_json
+    return b"".join((_OBSERVATION_FRAME, digest.digest(), header_size, header_json)), result_json
 
 
 def _decode_observation_payload(payload):
@@ -132,18 +254,28 @@ def consume_protocol():
     return protocol
 
 
-def _encode_message(message, protocol, *, observation_json=None):
+def _message_size(size, *, canonical_pipeline=False):
+    if not 0 < size <= MAX_MESSAGE_BYTES:
+        raise ValueError("Internal worker message exceeds the 128 MiB admission limit.")
+    if canonical_pipeline:
+        size |= _PIPELINE_TAG
+    return size.to_bytes(HEADER_BYTES, "big")
+
+
+def _encode_message(message, protocol, *, observation_json=None, canonical_pipeline=False):
     if protocol != FRAMED_PROTOCOL:
         raise RuntimeError("Unsupported internal worker protocol: " + protocol)
-    payload = _observation_payload(message, observation_json)
-    if payload is None:
+    if canonical_pipeline and (payload := _canonical_pipeline_message(message)) is not None:
+        return _message_size(len(payload), canonical_pipeline=True) + payload
+    observation = _observation_payload(message, observation_json)
+    if observation is None:
         if observation_json is not None:
             event = message["diagnostic"]
             message = {**message, "diagnostic": {**event, "result": loads(observation_json)}}
         payload = dumps(message).encode("utf-8", "backslashreplace")
-    if not 0 < len(payload) <= MAX_MESSAGE_BYTES:
-        raise ValueError("Internal worker message exceeds the 128 MiB admission limit.")
-    return len(payload).to_bytes(HEADER_BYTES, "big") + payload
+        return _message_size(len(payload)) + payload
+    header, result = observation
+    return b"".join((_message_size(len(header) + len(result)), header, result))
 
 
 def write_message(writer, message, *, protocol=FRAMED_PROTOCOL):
@@ -161,16 +293,78 @@ class WorkerMessageWriter:
     Other records flush the batch first and are sent immediately in order.
     """
 
-    def __init__(self, writer, *, protocol=FRAMED_PROTOCOL):
+    def __init__(self, writer, *, protocol=FRAMED_PROTOCOL, canonical_pipeline=False):
         self.writer = writer
         self.protocol = protocol
+        self.canonical_pipeline = canonical_pipeline
+        self._pipeline_templates = {}
+        self._timestamp_token = ("", b"")
         self.pending = bytearray()
         self.scheduled = None
 
     def send(self, message):
-        frame = _encode_message(message, self.protocol)
         event = message.get("diagnostic")
-        if isinstance(event, dict) and event.get("kind") == "pipeline" and len(frame) <= DIAGNOSTIC_BATCH_BYTES:
+        pipeline = isinstance(event, dict) and event.get("kind") == "pipeline"
+        frame = _encode_message(message, self.protocol)
+        self._send_frame(frame, pipeline)
+
+    def send_pipeline(self, event, execution_id):
+        """Reuse the exact encoded frame except for this event's own timestamp."""
+        if (
+            self.protocol != FRAMED_PROTOCOL or not self.canonical_pipeline
+            or type(event) is not Event
+            or execution_id is not None and (type(execution_id) is not int or execution_id <= 0)
+        ):
+            return False
+        path, effects = event.path, event.effects
+        call, phase, attempt = event.call_id, event.phase, event.attempt
+        branch, cleanup, dispatch, error = event.branch, event.cleanup, event.dispatch, event.error_type
+        if (
+            type(path) is not tuple or any(type(part) is not str for part in path)
+            or type(effects) is not frozenset or any(type(effect) is not Effect for effect in effects)
+            or type(call) not in (str, _NONE_TYPE) or type(phase) is not str or type(attempt) not in (int, _NONE_TYPE)
+            or type(branch) not in (bool, int, str, _NONE_TYPE)
+            or any(type(value) not in (str, _NONE_TYPE) for value in (cleanup, dispatch, error))
+        ):
+            return False
+        key = (call, path, phase, effects, attempt, type(branch), branch, cleanup, dispatch, error, execution_id)
+        templates = self._pipeline_templates
+        template = templates.get(key)
+        # Pipeline diagnostics used to stamp each event when its callback ran.
+        # Preserve that clock boundary for buffered native stages as well.
+        timestamp = _pipeline_timestamp()
+        if template is None:
+            message = _pipeline_message(event, timestamp, execution_id)
+            frame = _encode_message(message, self.protocol, canonical_pipeline=True)
+            if (
+                len(frame) <= HEADER_BYTES + _PIPELINE_MEMO_PAYLOAD_BYTES
+                and frame[0] & 128
+                and frame.startswith(_PIPELINE_TIMESTAMP, HEADER_BYTES)
+                and _TIMESTAMP_PATTERN.fullmatch(frame, _FAST_PIPELINE_START, _FAST_PIPELINE_END)
+            ):
+                if len(templates) >= _PIPELINE_MEMO_LIMIT:
+                    templates.clear()
+                templates[key] = (frame[:_FAST_PIPELINE_START], frame[_FAST_PIPELINE_END:])
+            self._send_frame(frame, True)
+            return True
+        cached_timestamp, token = self._timestamp_token
+        if timestamp != cached_timestamp:
+            token = b""
+            if type(timestamp) is str and len(timestamp) == 24 and timestamp.isascii():
+                candidate = ('"' + timestamp + '"').encode("ascii")
+                if _TIMESTAMP_PATTERN.fullmatch(candidate) is not None:
+                    token = candidate
+            self._timestamp_token = (timestamp, token)
+        if token:
+            self._send_frame(b"".join((template[0], token, template[1])), True)
+            return True
+        # The same timestamp was already obtained. Serialize the ordinary
+        # record with it when an unusual clock formatting cannot splice bytes.
+        self.send(_pipeline_message(event, timestamp, execution_id))
+        return True
+
+    def _send_frame(self, frame, pipeline):
+        if pipeline and len(frame) <= DIAGNOSTIC_BATCH_BYTES:
             if len(self.pending) + len(frame) > DIAGNOSTIC_BATCH_BYTES:
                 self.flush()
             self.pending.extend(frame)
@@ -195,7 +389,7 @@ class WorkerMessageWriter:
             self.writer.write(payload)
 
 
-async def read_message(reader, *, protocol=FRAMED_PROTOCOL):
+async def read_message(reader, *, protocol=FRAMED_PROTOCOL, encoded_pipeline=False, pipeline_lines=None):
     """Read one admitted message; only an EOF between messages is a clean close."""
     if protocol != FRAMED_PROTOCOL:
         raise RuntimeError("Unsupported internal worker protocol: " + protocol)
@@ -206,14 +400,40 @@ async def read_message(reader, *, protocol=FRAMED_PROTOCOL):
             return None
         raise
     size = int.from_bytes(header, "big")
+    tagged_pipeline = encoded_pipeline and bool(size & _PIPELINE_TAG)
+    if tagged_pipeline:
+        size ^= _PIPELINE_TAG
     if not 0 < size <= MAX_MESSAGE_BYTES:
         raise ValueError("Invalid internal worker message size (maximum 128 MiB).")
     payload = await reader.readexactly(size)
-    if payload.startswith(_OBSERVATION_FRAME):
+    if not tagged_pipeline and payload.startswith(_OBSERVATION_FRAME):
         return _decode_observation_payload(payload)
+    tail = None
+    if (
+        tagged_pipeline
+        and pipeline_lines is not None
+        and size <= _PIPELINE_MEMO_PAYLOAD_BYTES
+        and payload.startswith(_PIPELINE_TIMESTAMP)
+        and _TIMESTAMP_PATTERN.fullmatch(payload, _TIMESTAMP_START, _TIMESTAMP_END)
+    ):
+        tail = payload[_TIMESTAMP_END:]
+        cached = pipeline_lines.get(tail)
+        if cached is not None:
+            suffix, byte_count = cached
+            timestamp = payload[_TIMESTAMP_START:_TIMESTAMP_END].decode("ascii")
+            return EncodedPipelineDiagnostic(_JOURNAL_TIMESTAMP + timestamp + suffix, byte_count)
     message = loads(payload)
     if not isinstance(message, dict):
         raise TypeError("Internal worker message must be a JSON object.")
+    if tagged_pipeline:
+        diagnostic = _encoded_pipeline_diagnostic(payload, message)
+        # Only the worker's exact canonical spelling is memoized. Other tagged
+        # forms, including overwritten duplicate keys, keep the original parser.
+        if tail is not None and _canonical_pipeline_message(message) == payload:
+            if len(pipeline_lines) >= _PIPELINE_MEMO_LIMIT:
+                pipeline_lines.clear()
+            pipeline_lines[tail] = (diagnostic.line[_JOURNAL_SUFFIX_START:], diagnostic.byte_count)
+        return diagnostic
     return message
 
 

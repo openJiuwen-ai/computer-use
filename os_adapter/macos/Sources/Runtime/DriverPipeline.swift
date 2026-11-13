@@ -3,13 +3,18 @@
 import AppKit
 import ApplicationServices
 
+enum NativeCommandResult {
+    case fields([String: Any])
+    case observation(NativeObservationEncoding.Publication)
+}
+
 @MainActor enum DriverPipeline {
     static func validate(_ method: String) throws { try ValidateNativeMethodPass.run(method) }
     static func perform(
         _ method: String, _ raw: Any?, timeoutMs: Int, operation: @escaping (Any?) throws -> NativeOperation,
         resource: NativeResourceAccess, query: NativeQueryAccess, control: NativeControlAccess,
         launch: NativeLaunchAccess
-    ) async throws -> [String: Any] {
+    ) async throws -> NativeCommandResult {
         if ["inspect", "capture", "prepareObservation", "execute"].contains(method) {
             let op = try operation((raw as? [String: Any])?["operation"])
             let deadline = ResolveNativeRequestDeadlinePass.run(op, enclosing: RequestDiagnostics.deadline)
@@ -37,23 +42,25 @@ import ApplicationServices
         _ method: String, _ raw: Any?, timeoutMs: Int, operation: @escaping (Any?) throws -> NativeOperation,
         resource: NativeResourceAccess, query: NativeQueryAccess, control: NativeControlAccess,
         launch: NativeLaunchAccess
-    ) async throws -> [String: Any] {
+    ) async throws -> NativeCommandResult {
         switch method {
-        case "begin": return try await NativeResourceScope.begin(raw, timeoutMs: timeoutMs, access: resource)
-        case "locatePoint": return try resource.scopes.locatePoint(raw)
-        case "capture": return try await CapturePipeline.collect(raw, operation: operation, scopes: resource.scopes)
+        case "begin": return try await .fields(NativeResourceScope.begin(raw, timeoutMs: timeoutMs, access: resource))
+        case "locatePoint": return try .fields(resource.scopes.locatePoint(raw))
+        case "capture": return try await .fields(CapturePipeline.collect(
+            raw, operation: operation, scopes: resource.scopes))
         case "prepareObservation":
-            return try await ObservationPreparationPipeline.run(
-                raw, operation: operation, scopes: resource.scopes, launch: launch)
+            return try await .fields(ObservationPreparationPipeline.run(
+                raw, operation: operation, scopes: resource.scopes, launch: launch))
         case "inspect":
             let kind = ((raw as? [String: Any])?["query"] as? [String: Any])?["kind"] as? String
             if kind == "appChanges" || kind == "waitAppChange" {
-                return try await NativeAppChangePipeline.collect(raw, operation: operation, access: query)
+                return try await .fields(NativeAppChangePipeline.collect(raw, operation: operation, access: query))
             }
             return try ReadPipeline.collect(raw, operation: operation, access: query)
         case "execute":
-            return try await ControlPipeline.execute(raw, operation: operation, access: control, launch: launch)
-        case "finish": return try await NativeResourceScope.finish(raw, operation: operation)
+            return try await .fields(ControlPipeline.execute(
+                raw, operation: operation, access: control, launch: launch))
+        case "finish": return try await .fields(NativeResourceScope.finish(raw, operation: operation))
         default: throw DriverError("unknown native operation command", code: .invalidRequest)
         }
     }

@@ -16,7 +16,14 @@ from computer_use.native.preview import is_preview_event
 from .diagnostics import Journal
 from .output import OutputBuffer, is_output
 from .worker_lifecycle import EXIT_SETTLE_SECONDS, READY_ENV, WorkerLifecycle, WorkerStartupFailure
-from .worker_transport import FRAMED_PROTOCOL, EncodedObservationDiagnostic, read_message, write_message
+from .worker_transport import (
+    FRAMED_PROTOCOL,
+    PIPELINE_TAG_ENV,
+    EncodedObservationDiagnostic,
+    EncodedPipelineDiagnostic,
+    read_message,
+    write_message,
+)
 
 CLEANUP_TIMEOUT_SECONDS = 5
 
@@ -252,7 +259,7 @@ class ExecutionSession:
             COMPUTER_USE_DEMO_FOREGROUND="1" if self.demo_foreground else "0",
             COMPUTER_USE_LIFETIME_FD="4",
             COMPUTER_USE_WORKER_PROTOCOL=FRAMED_PROTOCOL,
-            **{READY_ENV: "1"},
+            **{READY_ENV: "1", PIPELINE_TAG_ENV: "1"},
         )
         if os.name == "nt":
             from .windows_worker import WorkerInterpreterOutsideJob, start_windows_worker
@@ -353,13 +360,17 @@ class ExecutionSession:
             raise WorkerStartupFailure(worker.failure())
 
     async def _receive(self, child, reader, worker):
+        pipeline_lines = {}
         error = None
         try:
             while True:
-                message = await read_message(reader)
+                message = await read_message(reader, encoded_pipeline=True, pipeline_lines=pipeline_lines)
                 if message is None:
                     break
                 if self._child is not child:
+                    continue
+                if isinstance(message, EncodedPipelineDiagnostic):
+                    self._journal.record_pipeline(message.line, message.byte_count)
                     continue
                 if isinstance(message, EncodedObservationDiagnostic):
                     self._journal.record_observation(message.header_json, message.result_json)
