@@ -75,9 +75,9 @@ def snapshot(path):
             cells = {}
             for row in sheet.iter_rows():
                 for cell in row:
-                    number_format = getattr(cell, "number_format", None)
-                    if cell.value is not None or number_format not in (None, "General"):
-                        cells[cell.coordinate] = (cell.data_type, cell.value, number_format)
+                    cell_format = getattr(cell, "number_format", None)
+                    if cell.value is not None or cell_format not in (None, "General"):
+                        cells[cell.coordinate] = (cell.data_type, cell.value, cell_format)
             result[sheet.title] = cells
         return result
     finally:
