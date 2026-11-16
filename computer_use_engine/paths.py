@@ -90,7 +90,9 @@ def _linux_desktop_unavailable_reason() -> str | None:
         if result.returncode == 0:
             return None
         if result.returncode != DESKTOP_UNAVAILABLE:
-            _LOG.warning("Linux desktop availability probe exited with %d: %s", result.returncode, result.stderr.strip())
+            _LOG.warning(
+                "Linux desktop availability probe exited with %d: %s", result.returncode, result.stderr.strip(),
+            )
     return "backend_missing"
 
 
