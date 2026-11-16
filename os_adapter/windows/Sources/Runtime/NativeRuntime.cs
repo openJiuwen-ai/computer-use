@@ -300,7 +300,8 @@ namespace ComputerUse.Windows
 
         object Execute(Dictionary<string, object> p, Request r)
         {
-            if (writer == null && launch == null)
+            bool installation = original != null && NativeBinding.IsInstallation(original);
+            if (installation ? launch == null : writer == null)
                 throw new Failure("unsupported_operation", "this native driver has no input execution provider");
             Wire.Keys(p, "operation,step,command");
             string id = Wire.Str(p, "operation");
@@ -315,7 +316,6 @@ namespace ComputerUse.Windows
                 throw new Failure("stale_target", "native write operation is unknown or expired");
             if (NativeBinding.IsGlobal(original) && step != 1)
                 throw new Failure("invalid_request", "a global operation dispatches one primitive");
-            bool installation = NativeBinding.IsInstallation(original);
             if (installation != NativeBinding.IsInstallation(target) ||
                 installation && (step != 1 || !NativeWriteOperation.Same(original, target)))
                 throw new Failure("invalid_request", "an application launch dispatches one primitive in its original scope");

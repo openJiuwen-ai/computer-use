@@ -51,7 +51,12 @@ from computer_use.interaction.read.app_read.passes.validate_explicit_startup imp
 )
 from computer_use.interaction.read.app_read.startup.pipeline import StartupServiceNode
 from computer_use.native.contracts import ApplicationBinding, Dispatch, Intent
-from computer_use.native.query.directory import applications_query, surfaces_query, supports_windows_launch_lookup
+from computer_use.native.query.directory import (
+    applications_query,
+    should_lookup_windows_launch,
+    surfaces_query,
+    supports_windows_launch_lookup,
+)
 from computer_use.native.scopes import PendingApplicationLaunch
 from computer_use.pipeline import Contract, Effect, Pipeline, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
@@ -134,12 +139,12 @@ class DirectorySelectionPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                     try:
                         application = select_application(applications, selector, allow_windows_lookup=windows_lookup)
                     except ComputerUseError as error:
-                        if not windows_lookup or error.code != "element_not_found" or error.effect != "none":
+                        if not windows_lookup or not should_lookup_windows_launch(error):
                             raise
                         applications = await services.directory.collect(
                             read, {"kind": "applications", "launchSelector": selector}, _control=control,
                         )
-                        application = select_application(applications, selector)
+                        application = select_application(applications, selector, allow_windows_lookup=windows_lookup)
                     if not application["isRunning"]:
                         pending = services.pending_launches.get(application["id"])
                 if pending is not None:

@@ -12,7 +12,12 @@ from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.membership import ancestor, interaction_contains
 from computer_use.interaction.read.model import WindowSelectionRequired
 from computer_use.native.contracts import Knowledge
-from computer_use.native.query.directory import SurfaceReadProfile, select_application, supports_windows_launch_lookup
+from computer_use.native.query.directory import (
+    SurfaceReadProfile,
+    select_application,
+    should_lookup_windows_launch,
+    supports_windows_launch_lookup,
+)
 from computer_use.native.scopes import (
     FixedWindowInvalidated,
     FixedWindowUnconfirmed,
@@ -245,7 +250,7 @@ async def resolve(controller, ui, view, *, allow_windows_launch=False):
         try:
             application = select_application(applications, selector, allow_windows_lookup=windows_lookup)
         except ComputerUseError as error:
-            if not windows_lookup or error.code != "element_not_found" or error.effect != "none":
+            if not windows_lookup or not should_lookup_windows_launch(error):
                 raise
             return await observe_application(controller, ui, selector, view, source_applications=applications)
         if not application["isRunning"]:

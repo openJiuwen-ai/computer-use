@@ -110,35 +110,64 @@ namespace ComputerUse.Windows
                    (Same(name, selector) || Same(Path.GetFileNameWithoutExtension(name), selector));
         }
 
-        static bool PackageAlias(dynamic item, string id, string selector)
+        static XmlDocument ReadPackageManifest(string path)
         {
-            int separator = id.IndexOf('!');
-            if (separator < 0)
-                return false;
-            string path = OptionalProperty(item, "System.AppUserModel.PackageInstallPath");
-            if (String.IsNullOrEmpty(path))
-                return false;
             try
             {
                 var manifest = new XmlDocument { XmlResolver = null };
                 using (var reader = XmlReader.Create(Path.Combine(path, "AppxManifest.xml"),
                     new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit }))
                     manifest.Load(reader);
-                foreach (XmlElement app in manifest.SelectNodes(
-                    "/*[local-name()='Package']/*[local-name()='Applications']/*[local-name()='Application']"))
-                {
-                    if (!Same(app.GetAttribute("Id"), id.Substring(separator + 1)))
-                        continue;
-                    return ExecutableName(app.GetAttribute("Executable"), selector) ||
-                           app.SelectNodes(".//*[local-name()='ExecutionAlias']").Cast<XmlElement>()
-                              .Any(alias => ExecutableName(alias.GetAttribute("Alias"), selector));
-                }
+                return manifest;
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
             catch (XmlException) { }
             catch (ArgumentException) { }
+            return null;
+        }
+
+        static bool PackageAlias(XmlDocument manifest, string id, string selector)
+        {
+            string application = id.Substring(id.IndexOf('!') + 1);
+            foreach (XmlElement app in manifest.SelectNodes(
+                "/*[local-name()='Package']/*[local-name()='Applications']/*[local-name()='Application']"))
+            {
+                if (!Same(app.GetAttribute("Id"), application))
+                    continue;
+                return ExecutableName(app.GetAttribute("Executable"), selector) ||
+                       app.SelectNodes(".//*[local-name()='ExecutionAlias']").Cast<XmlElement>()
+                          .Any(alias => ExecutableName(alias.GetAttribute("Alias"), selector));
+            }
             return false;
+        }
+
+        internal static NativeApplicationEntry[] FindAliases(
+            Dictionary<NativeApplicationEntry, string> packages, string selector, Request request)
+        {
+            bool incomplete = false;
+            var matches = new Dictionary<string, NativeApplicationEntry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var package in packages.GroupBy(item => item.Value, StringComparer.OrdinalIgnoreCase))
+            {
+                CheckLookup(request);
+                var manifest = ReadPackageManifest(package.Key);
+                if (manifest == null)
+                {
+                    incomplete = true;
+                    continue;
+                }
+                foreach (var item in package)
+                {
+                    CheckLookup(request);
+                    var entry = item.Key;
+                    if (PackageAlias(manifest, entry.ShellId, selector))
+                        matches[entry.ShellId] = entry;
+                }
+            }
+            if (matches.Count == 0 && incomplete)
+                throw new Failure("observation_incomplete",
+                                  "Windows execution alias lookup could not read an installed package manifest. Use the Start menu name or application ID.");
+            return matches.Values.ToArray();
         }
 
         internal static NativeApplicationEntry[] Find(string selector, Request request)
@@ -161,6 +190,7 @@ namespace ComputerUse.Windows
                     return new[] { exact };
 
                 var matches = new Dictionary<string, NativeApplicationEntry>(StringComparer.OrdinalIgnoreCase);
+                var packages = new Dictionary<NativeApplicationEntry, string>();
                 items = ((dynamic)folder).Items();
                 foreach (object raw in (IEnumerable)items)
                 {
@@ -174,17 +204,24 @@ namespace ComputerUse.Windows
                         var entry = Entry(raw, name, id);
                         if (Same(id, selector))
                             return new[] { entry };
-                        if (Same(name, selector) || ExecutableName(entry.Executable, selector) ||
-                            PackageAlias(raw, id, selector))
+                        if (Same(name, selector) || ExecutableName(entry.Executable, selector))
                             matches[id] = entry;
+                        else if (matches.Count == 0 && id.IndexOf('!') >= 0)
+                        {
+                            string location = OptionalProperty(raw, "System.AppUserModel.PackageInstallPath");
+                            if (!String.IsNullOrEmpty(location))
+                                packages.Add(entry, location);
+                        }
                     }
                     finally
                     {
                         Release(raw);
                     }
                 }
+                // Inspect each package only if no exact Shell entry or standalone executable name matched.
+                var selected = matches.Count == 0 ? FindAliases(packages, selector, request) : matches.Values.ToArray();
                 CheckLookup(request);
-                return matches.Values.OrderBy(entry => entry.Name).ThenBy(entry => entry.ShellId).ToArray();
+                return selected.OrderBy(entry => entry.Name).ThenBy(entry => entry.ShellId).ToArray();
             }
             catch (COMException error)
             {
@@ -199,6 +236,30 @@ namespace ComputerUse.Windows
         }
 
         internal static void Open(NativeApplicationEntry entry, Action sending)
+        {
+            InvokeOpen(markSending => OpenEntry(entry, markSending), sending);
+        }
+
+        internal static void InvokeOpen(Action<Action> invoke, Action sending)
+        {
+            bool attempted = false;
+            try
+            {
+                invoke(() => {
+                    sending();
+                    attempted = true;
+                });
+            }
+            catch (Failure) { throw; }
+            catch (NativeDesktopCleanupFailure) { throw; }
+            catch (Exception error)
+            {
+                string code = attempted ? "execution_unknown" : "input_unavailable";
+                throw new Failure(code, "Windows desktop Shell startup failed: " + error.Message);
+            }
+        }
+
+        static void OpenEntry(NativeApplicationEntry entry, Action sending)
         {
             object shell = null, windows = null, desktop = null, view = null, broker = null, folder = null;
             try

@@ -244,7 +244,7 @@ class InterfaceReadPipeline:
             raise
         # pylint: disable-next=protected-access
         instance = ui._instance
-        launch = first.launch if isinstance(first, AppObservation) else first
+        launch = first.launch if isinstance(first, (AppObservation, MenuAppObservation)) else first
         windows_launch = launch if directory.get("platform") == "windows" and isinstance(launch, Mapping) else None
         preparation = None
         try:

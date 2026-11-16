@@ -15,11 +15,21 @@ from computer_use.native.contracts import Binding
 WINDOWS_APPLICATION_LOOKUP = "nativeWindowsApplicationLookup"
 
 
+class _WindowsLaunchLookupRequired(ComputerUseError):
+    """A partial running catalogue calls for a targeted Windows lookup."""
+
+
 def supports_windows_launch_lookup(directory, capabilities):
     return (
         WINDOWS_APPLICATION_LOOKUP in capabilities
         and directory.get("platform") == "windows"
         and directory.get("scope") == "runningWindows"
+    )
+
+
+def should_lookup_windows_launch(error):
+    return error.effect == "none" and (
+        error.code == "element_not_found" or isinstance(error, _WindowsLaunchLookupRequired)
     )
 
 
@@ -75,7 +85,12 @@ def select_application(directory, selector, *, allow_windows_lookup=False):
     if not isinstance(selector, str) or not selector.strip():
         raise ValueError("A nonempty application selector is required")
     entries = directory["applications"]
-    if directory.get("launchSelector") == selector:
+    if "launchSelector" in directory:
+        if not allow_windows_lookup or directory["launchSelector"] != selector:
+            _refuse(
+                "invalid_request", "Windows launch candidates require an explicit lookup for this selector.",
+                "application",
+            )
         if directory["stopReasons"]:
             _refuse("observation_incomplete", directory["stopReasons"][0], "application")
         if len(entries) == 1:
@@ -110,6 +125,15 @@ def select_application(directory, selector, *, allow_windows_lookup=False):
     active = [item for item in matches if item["isRunning"]]
     matches = active or matches
     if directory["stopReasons"]:
+        if allow_windows_lookup and not matches:
+            raise _WindowsLaunchLookupRequired(
+                {
+                    "code": "observation_incomplete",
+                    "effect": "none",
+                    "target": "application",
+                    "detail": "Application discovery is partial; the Windows selector requires a targeted lookup.",
+                }
+            )
         native_processes = directory.get("nativeProcessNames")
         exact_windows_process = (
             directory.get("platform") == "windows"
@@ -120,12 +144,10 @@ def select_application(directory, selector, *, allow_windows_lookup=False):
                 row["application"] for row in native_processes or () if row["name"].casefold() == name
             ] == [matches[0]["id"]]
         )
-        # Win32 can complete independently of the optional desktop UIA supplement.
-        # An exact ID or a missing selector can proceed with this native evidence.
-        complete_win32_lookup = allow_windows_lookup and native_processes is not None and (
-            not matches or len(matches) == 1 and matches[0]["identifier"] == selector and any(
-                row["application"] == matches[0]["id"] for row in native_processes
-            )
+        # An exact ID observed by Win32 stands independently of desktop UIA enrichment.
+        exact_id = len(matches) == 1 and matches[0]["identifier"] == selector
+        complete_win32_lookup = allow_windows_lookup and exact_id and any(
+            row["application"] == matches[0]["id"] for row in native_processes or ()
         )
         if not (exact_windows_process or complete_win32_lookup):
             _refuse(

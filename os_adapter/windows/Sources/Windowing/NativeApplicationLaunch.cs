@@ -101,7 +101,7 @@ namespace ComputerUse.Windows
             {
                 double until = Math.Min(request.Deadline - PublicationMs, Wire.Now + ConfirmationMs);
                 request.ObservationDeadline = until;
-                var running = FindWindow(entry, request);
+                var running = FindWindow(entry, request, verifyAbsence: true);
                 if (running != null)
                 {
                     receipt["detail"] = "A matching Windows application window was already open.";
@@ -147,16 +147,16 @@ namespace ComputerUse.Windows
             return receipt;
         }
 
-        object FindWindow(NativeApplicationEntry entry, Request request)
+        object FindWindow(NativeApplicationEntry entry, Request request, bool verifyAbsence = false)
         {
-            var rows = Running(entry, request, new List<string>());
+            var rows = Running(entry, request, new List<string>(), verifyAbsence);
             if (rows.Length > 1)
                 throw new Failure("ambiguous_target",
                                   "Several Windows application instances match the launch entry. Select a running window.");
             return rows.SingleOrDefault();
         }
 
-        object[] Running(NativeApplicationEntry entry, Request request, List<string> notes)
+        object[] Running(NativeApplicationEntry entry, Request request, List<string> notes, bool verifyAbsence = false)
         {
             var catalogue = store.Catalog(request, notes, accessibility: false);
             var matches = catalogue.Windows.Where(window => Matches(entry, window, request)).ToArray();
@@ -164,6 +164,9 @@ namespace ComputerUse.Windows
             // windows omit metadata. The normal app read selects its windows.
             if (matches.Length != 0)
                 notes.Clear();
+            else if (verifyAbsence && catalogue.NativeProcessNames == null)
+                throw new Failure("observation_incomplete",
+                                  "Windows could not confirm whether the selected application already has a running window.");
             return NativeReadBackend.ApplicationRows(matches);
         }
 

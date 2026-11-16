@@ -37,13 +37,109 @@ static class LaunchProbe
 }
 """
 
+SHELL_PROBE = """
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using System.Threading;
+using Microsoft.CSharp.RuntimeBinder;
 
-@pytest.mark.skipif(sys.platform != "win32", reason="requires a Windows desktop")
-def test_explicit_read_launches_executable_and_retains_its_window(tmp_path):
+static class ShellProbe
+{
+    const BindingFlags Internal = BindingFlags.Static | BindingFlags.Instance | BindingFlags.NonPublic;
+
+    static void ExpectFailure(string code, Action call)
+    {
+        try
+        {
+            call();
+        }
+        catch (TargetInvocationException error)
+        {
+            var field = error.InnerException.GetType().GetField("Code", Internal);
+            if (field != null && Equals(code, field.GetValue(error.InnerException)))
+                return;
+            throw;
+        }
+        throw new InvalidOperationException("Expected " + code);
+    }
+
+    static void Main(string[] args)
+    {
+        var driver = Assembly.LoadFrom(args[0]);
+        var shell = driver.GetType("ComputerUse.Windows.NativeApplicationShell", true);
+        var invoke = shell.GetMethod("InvokeOpen", Internal);
+        if (invoke == null)
+            throw new MissingMethodException("Expected a Shell dispatch failure boundary");
+        foreach (bool send in new[] { false, true })
+        {
+            int dispatches = 0;
+            Action<Action> open = sending => {
+                if (send)
+                    sending();
+                throw new RuntimeBinderException("Shell member unavailable");
+            };
+            Action mark = () => { dispatches++; };
+            ExpectFailure(send ? "execution_unknown" : "input_unavailable",
+                          () => invoke.Invoke(null, new object[] { open, mark }));
+            if (dispatches != (send ? 1 : 0))
+                throw new InvalidOperationException("Incorrect launch dispatch count");
+        }
+
+        var application = driver.GetType("ComputerUse.Windows.NativeApplicationEntry", true);
+        var requestType = driver.GetType("ComputerUse.Windows.Request", true);
+        var request = Activator.CreateInstance(requestType, Internal, null,
+                                               new object[] { CancellationToken.None, 5000, false }, null);
+        var packages = (IDictionary)Activator.CreateInstance(
+            typeof(Dictionary<,>).MakeGenericType(application, typeof(string)));
+        var entry = Activator.CreateInstance(application, Internal, null,
+                                              new object[] { "Example", "Example!App", null }, null);
+        packages.Add(entry, args[1]);
+        var aliases = shell.GetMethod("FindAliases", Internal);
+        var query = new object[] { packages, "example", request };
+        ExpectFailure("observation_incomplete", () => aliases.Invoke(null, query));
+
+        File.WriteAllText(Path.Combine(args[1], "AppxManifest.xml"),
+                           "<Package><Applications><Application Id='App' Executable='example.exe'/>" +
+                           "</Applications></Package>");
+        var matches = (Array)aliases.Invoke(null, query);
+        if (matches.Length != 1 || !ReferenceEquals(entry, matches.GetValue(0)))
+            throw new InvalidOperationException("Expected the manifest's exact application");
+    }
+}
+"""
+
+
+@pytest.fixture
+def windows_driver():
+    if sys.platform != "win32":
+        pytest.skip("requires a Windows driver")
     compiler = Path(os.environ.get("WINDIR", "C:/Windows")) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
     driver = Path(paths.native_driver()["command"])
     if not compiler.is_file() or not driver.is_file():
         pytest.skip("requires the built Windows driver and its C# compiler")
+    return compiler, driver
+
+
+def test_shell_dispatch_and_alias_failures_keep_their_native_codes(tmp_path, windows_driver):
+    compiler, driver = windows_driver
+    source = tmp_path / "ShellProbe.cs"
+    source.write_text(SHELL_PROBE, encoding="utf-8")
+    executable = tmp_path / "ShellProbe.exe"
+    for command in (
+        [compiler, "/nologo", "/reference:Microsoft.CSharp.dll", f"/out:{executable}", source],
+        [executable, driver, tmp_path],
+    ):
+        result = subprocess.run(
+            command, capture_output=True, text=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW, check=False
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_explicit_read_launches_executable_and_retains_its_window(tmp_path, windows_driver):
+    compiler, driver = windows_driver
     if find_spec("computer_use.interaction.read.accessibility._ax_read") is None:
         pytest.skip("requires the Rust accessibility extension")
     permissions = subprocess.check_output([driver, "--check-permissions"], timeout=5, encoding="utf-8")
