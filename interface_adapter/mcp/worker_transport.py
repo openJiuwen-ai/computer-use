@@ -20,7 +20,7 @@ import re
 import socket
 from asyncio import IncompleteReadError, get_running_loop
 from dataclasses import dataclass
-from types import MappingProxyType
+from types import MappingProxyType, NoneType
 
 from computer_use.diagnostics import _pipeline_timestamp
 from computer_use.json import loads
@@ -53,7 +53,6 @@ _PIPELINE_FIELDS = (
     "timestamp", "kind", "callId", "path", "phase", "effects", "attempt", "branch", "cleanup", "dispatch", "errorType"
 )
 _PIPELINE_ENCODER = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False)
-_NONE_TYPE = type(None)
 _FAST_PIPELINE_START = HEADER_BYTES + _TIMESTAMP_START
 _FAST_PIPELINE_END = HEADER_BYTES + _TIMESTAMP_END
 
@@ -77,25 +76,30 @@ class EncodedPipelineDiagnostic:
 
 def _canonical_trace_field(value):
     kind = type(value)
-    return (
-        value is None
-        or kind in (bool, int, str)
-        or kind is list and all(type(part) is str for part in value)
-    )
+    if value is None or kind in (bool, int, str):
+        return True
+    # Reused trace bytes require built-in strings with standard JSON behavior.
+    # pylint: disable-next=unidiomatic-typecheck
+    return kind is list and all(type(part) is str for part in value)
 
 
 def _canonical_pipeline_message(message):
     event = message.get("diagnostic")
-    if (
-        type(message) is not dict
-        or type(event) is not dict
-        or tuple(message) not in (("diagnostic",), ("diagnostic", "executionId"))
-        or tuple(event) != _PIPELINE_FIELDS
-        or any(type(key) is not str for key in (*message, *event))
-        or not all(_canonical_trace_field(value) for value in event.values())
-    ):
+    # Keep dictionary subclasses with custom behavior on the regular path.
+    # pylint: disable-next=unidiomatic-typecheck
+    if type(message) is not dict or type(event) is not dict:
+        return None
+    if tuple(message) not in (("diagnostic",), ("diagnostic", "executionId")) or tuple(event) != _PIPELINE_FIELDS:
+        return None
+    # Memoization depends on keys that use built-in string equality.
+    # pylint: disable-next=unidiomatic-typecheck
+    if any(type(key) is not str for key in (*message, *event)):
+        return None
+    if not all(_canonical_trace_field(value) for value in event.values()):
         return None
     execution_id = message.get("executionId")
+    # Positive integer IDs and booleans have different wire encodings.
+    # pylint: disable-next=unidiomatic-typecheck
     if execution_id is not None and (type(execution_id) is not int or execution_id <= 0):
         return None
     try:
@@ -131,21 +135,22 @@ def _pipeline_message(event, timestamp, execution_id):
 
 def _encoded_pipeline_diagnostic(payload, message):
     event = message.get("diagnostic")
-    if (
-        not payload.startswith(_PIPELINE_TIMESTAMP)
-        or not _TIMESTAMP_PATTERN.fullmatch(payload, _TIMESTAMP_START, _TIMESTAMP_END)
-        or b"\n" in payload
-        or b"\r" in payload
-        or not isinstance(event, dict)
-        or event.get("kind") != "pipeline"
-        or tuple(event) != _PIPELINE_FIELDS
-        or not all(_canonical_trace_field(value) for value in event.values())
-    ):
-        raise ValueError("Invalid canonical pipeline diagnostic.")
+    invalid = "Invalid canonical pipeline diagnostic."
+    valid_timestamp = payload.startswith(_PIPELINE_TIMESTAMP) and _TIMESTAMP_PATTERN.fullmatch(
+        payload, _TIMESTAMP_START, _TIMESTAMP_END
+    )
+    if not valid_timestamp or b"\n" in payload or b"\r" in payload:
+        raise ValueError(invalid)
+    if not isinstance(event, dict) or event.get("kind") != "pipeline" or tuple(event) != _PIPELINE_FIELDS:
+        raise ValueError(invalid)
+    if not all(_canonical_trace_field(value) for value in event.values()):
+        raise ValueError(invalid)
 
     execution_id = message.get("executionId")
     if execution_id is None:
         suffix = b',"executionId":null}'
+    # Execution IDs are positive built-in integers.
+    # pylint: disable-next=unidiomatic-typecheck
     elif type(execution_id) is int and execution_id > 0:
         suffix = b',"executionId":' + str(execution_id).encode("ascii") + b"}"
     else:
@@ -162,7 +167,8 @@ def _encoded_pipeline_diagnostic(payload, message):
         raise ValueError("Invalid canonical pipeline diagnostic envelope.")
     # The private tag comes only from the canonical encoder. Move its
     # execution ID into the journal envelope without repeating serialization.
-    line = b"".join((memoryview(payload)[len(_PIPELINE_ENVELOPE) : event_end - 1], suffix, b"\n"))
+    body_start, body_end = len(_PIPELINE_ENVELOPE), event_end - 1
+    line = b"".join((memoryview(payload)[body_start:body_end], suffix, b"\n"))
     return EncodedPipelineDiagnostic(line.decode("utf-8"), len(line))
 
 
@@ -265,8 +271,10 @@ def _message_size(size, *, canonical_pipeline=False):
 def _encode_message(message, protocol, *, observation_json=None, canonical_pipeline=False):
     if protocol != FRAMED_PROTOCOL:
         raise RuntimeError("Unsupported internal worker protocol: " + protocol)
-    if canonical_pipeline and (payload := _canonical_pipeline_message(message)) is not None:
-        return _message_size(len(payload), canonical_pipeline=True) + payload
+    if canonical_pipeline:
+        payload = _canonical_pipeline_message(message)
+        if payload is not None:
+            return _message_size(len(payload), canonical_pipeline=True) + payload
     observation = _observation_payload(message, observation_json)
     if observation is None:
         if observation_json is not None:
@@ -310,22 +318,32 @@ class WorkerMessageWriter:
 
     def send_pipeline(self, event, execution_id):
         """Reuse the exact encoded frame except for this event's own timestamp."""
-        if (
-            self.protocol != FRAMED_PROTOCOL or not self.canonical_pipeline
-            or type(event) is not Event
-            or execution_id is not None and (type(execution_id) is not int or execution_id <= 0)
-        ):
+        if self.protocol != FRAMED_PROTOCOL or not self.canonical_pipeline:
+            return False
+        # Only the built-in event contract is used to identify reusable bytes.
+        # pylint: disable-next=unidiomatic-typecheck
+        if type(event) is not Event:
+            return False
+        # Preserve the integer form in the frame and in the cache key.
+        # pylint: disable-next=unidiomatic-typecheck
+        if execution_id is not None and (type(execution_id) is not int or execution_id <= 0):
             return False
         path, effects = event.path, event.effects
         call, phase, attempt = event.call_id, event.phase, event.attempt
         branch, cleanup, dispatch, error = event.branch, event.cleanup, event.dispatch, event.error_type
-        if (
-            type(path) is not tuple or any(type(part) is not str for part in path)
-            or type(effects) is not frozenset or any(type(effect) is not Effect for effect in effects)
-            or type(call) not in (str, _NONE_TYPE) or type(phase) is not str or type(attempt) not in (int, _NONE_TYPE)
-            or type(branch) not in (bool, int, str, _NONE_TYPE)
-            or any(type(value) not in (str, _NONE_TYPE) for value in (cleanup, dispatch, error))
-        ):
+        # Cache keys need exact types and standard hashing and serialization.
+        # pylint: disable-next=unidiomatic-typecheck
+        if type(path) is not tuple or any(type(part) is not str for part in path):
+            return False
+        # pylint: disable-next=unidiomatic-typecheck
+        if type(effects) is not frozenset or any(type(effect) is not Effect for effect in effects):
+            return False
+        # pylint: disable-next=unidiomatic-typecheck
+        if type(call) not in (str, NoneType) or type(phase) is not str or type(attempt) not in (int, NoneType):
+            return False
+        if type(branch) not in (bool, int, str, NoneType):
+            return False
+        if any(type(value) not in (str, NoneType) for value in (cleanup, dispatch, error)):
             return False
         key = (call, path, phase, effects, attempt, type(branch), branch, cleanup, dispatch, error, execution_id)
         templates = self._pipeline_templates
@@ -336,9 +354,9 @@ class WorkerMessageWriter:
         if template is None:
             message = _pipeline_message(event, timestamp, execution_id)
             frame = _encode_message(message, self.protocol, canonical_pipeline=True)
+            can_cache = len(frame) <= HEADER_BYTES + _PIPELINE_MEMO_PAYLOAD_BYTES and frame[0] & 128
             if (
-                len(frame) <= HEADER_BYTES + _PIPELINE_MEMO_PAYLOAD_BYTES
-                and frame[0] & 128
+                can_cache
                 and frame.startswith(_PIPELINE_TIMESTAMP, HEADER_BYTES)
                 and _TIMESTAMP_PATTERN.fullmatch(frame, _FAST_PIPELINE_START, _FAST_PIPELINE_END)
             ):
@@ -350,6 +368,8 @@ class WorkerMessageWriter:
         cached_timestamp, token = self._timestamp_token
         if timestamp != cached_timestamp:
             token = b""
+            # Only a built-in timestamp string can reuse the exact JSON token.
+            # pylint: disable-next=unidiomatic-typecheck
             if type(timestamp) is str and len(timestamp) == 24 and timestamp.isascii():
                 candidate = ('"' + timestamp + '"').encode("ascii")
                 if _TIMESTAMP_PATTERN.fullmatch(candidate) is not None:
@@ -409,10 +429,9 @@ async def read_message(reader, *, protocol=FRAMED_PROTOCOL, encoded_pipeline=Fal
     if not tagged_pipeline and payload.startswith(_OBSERVATION_FRAME):
         return _decode_observation_payload(payload)
     tail = None
+    can_reuse = tagged_pipeline and pipeline_lines is not None and size <= _PIPELINE_MEMO_PAYLOAD_BYTES
     if (
-        tagged_pipeline
-        and pipeline_lines is not None
-        and size <= _PIPELINE_MEMO_PAYLOAD_BYTES
+        can_reuse
         and payload.startswith(_PIPELINE_TIMESTAMP)
         and _TIMESTAMP_PATTERN.fullmatch(payload, _TIMESTAMP_START, _TIMESTAMP_END)
     ):

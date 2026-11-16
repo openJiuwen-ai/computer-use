@@ -149,7 +149,9 @@ def encode_observation(result: dict[str, Any]) -> dict[str, Any]:
     def declare(ref: str) -> dict[str, Any]:
         node = nodes.get(ref)
         if node is None:
-            node = nodes[ref] = dict(id=ref, source=SOURCE, kind="element", nativeType="AtspiAccessible", properties=None)
+            node = nodes[ref] = dict(
+                id=ref, source=SOURCE, kind="element", nativeType="AtspiAccessible", properties=None
+            )
         return node
 
     def read_details(requested: tuple[str, ...]) -> dict[str, Any]:

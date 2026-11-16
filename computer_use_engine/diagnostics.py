@@ -15,9 +15,9 @@ _pipeline_transport = None
 # The shortcut skips ordinary Python and C serializer frames. Near either
 # recursion boundary let the original path decide whether to emit the trace.
 _PIPELINE_FRAME_MARGIN = 96
-_PIPELINE_STACK_PROBE = str
-for _level in range(40):
-    _PIPELINE_STACK_PROBE = (_PIPELINE_STACK_PROBE,)
+_pipeline_stack_probe = (str,)
+for _level in range(39):
+    _pipeline_stack_probe = (_pipeline_stack_probe,)
 _PIPELINE_STACK_SUPPORTED = implementation.name == "cpython" and version_info[:2] >= (3, 11)
 # pylint: disable-next=invalid-name
 _structured = False
@@ -61,7 +61,7 @@ def _pipeline_stack_has_room():
     try:
         _getframe(max(0, getrecursionlimit() - _PIPELINE_FRAME_MARGIN))
     except ValueError:
-        isinstance(0, _PIPELINE_STACK_PROBE)
+        isinstance(0, _pipeline_stack_probe)
         return True
     return False
 
@@ -98,9 +98,11 @@ def pipeline_diagnostic(event):
         else:
             if has_room:
                 try:
-                    if binding[1](event):
-                        return
+                    use_regular = not binding[1](event)
                 except Exception:
+                    # The writer may already have enqueued the trace.
+                    use_regular = False
+                if not use_regular:
                     return
     diagnostic(
         dict(
