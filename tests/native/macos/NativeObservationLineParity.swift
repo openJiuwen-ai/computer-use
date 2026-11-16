@@ -52,5 +52,52 @@ import Foundation
         var reference = try JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys, .fragmentsAllowed])
         reference.append(10)
         precondition(NativeObservationLine.encode(graph, id: 7, session: "session", version: 6) == reference)
+
+        try verifyRelationDetailsOutsideSourceTemplates()
+    }
+
+    private static func verifyRelationDetailsOutsideSourceTemplates() throws {
+        typealias Encoding = NativeObservationEncoding
+        typealias Record = Encoding.Record
+        let root = "root"
+        let readDetails: [Record] = [
+            ["state": "timeout", "certainty": "unknown", "detail": "collection time budget"],
+            ["state": "partial", "certainty": "confirmed", "detail": "child identity changed",
+             "offset": 0, "total": 2, "cursor": "next"],
+            ["state": "complete", "certainty": "confirmed", "total": 1]
+        ]
+        let sourceFields: [Record] = [
+            ["property": "AXTitleUIElement", "targets": [String]()],
+            ["property": "AXChildren", "targets": ["child"], "nativeType": "CFArray",
+             "nativeAPI": "AXUIElementCopyAttributeValues"],
+            ["property": "AXParent", "targets": ["parent"], "nativeType": "AXUIElement",
+             "nativeAPI": "AXUIElementCopyAttributeValue"]
+        ]
+        let relations = zip(readDetails, sourceFields).map { details, fields -> Record in
+            var relation = details.merging(fields) { old, _ in old }
+            relation["source"] = root
+            return relation
+        }
+        let observation = Encoding.publish(.init(
+            session: "session", surface: "window", stamp: .init(id: "capture", startedAt: 1, completedAt: 2),
+            roots: [root], relations: relations))
+        let published = observation.record()
+        let nodes = published["nodes"] as! [Record]
+        let properties = nodes.first { $0["id"] as? String == root }!["properties"] as! [Record]
+        let pool = published["metadataValues"] as! [Record]
+        precondition(properties.count == relations.count)
+        for (property, rawDetails) in zip(properties, readDetails) {
+            let read = property["read"] as! Record
+            let details = (read["details"] as! [[Any]]).map { pair -> [Any] in
+                let index = (pair[1] as! Record)["metadataValue"] as! Int
+                return [pair[0], pool[index]]
+            }
+            var expected = rawDetails
+            expected["relation"] = true
+            let actualBytes = try JSONSerialization.data(withJSONObject: details, options: [.sortedKeys])
+            let expectedBytes = try JSONSerialization.data(
+                withJSONObject: Encoding.details(expected), options: [.sortedKeys])
+            precondition(actualBytes == expectedBytes, "Non-template relations must publish all read details")
+        }
     }
 }
