@@ -30,7 +30,7 @@ Run Computer Use on the computer you want to control, in a logged-in and unlocke
 
 | Platform | OS version and runtime requirements |
 | --- | --- |
-| macOS | macOS 14.0 (Sonoma) or later on Apple silicon or Intel Macs. Grant Accessibility permission to read the accessibility tree and control apps, and Screen Recording permission to take screenshots. |
+| macOS | macOS 14.0 (Sonoma) or later on Apple silicon or Intel Macs. Follow the system prompts to grant **Jiuwen CUA** Accessibility and Screen Recording access on first use. |
 | Windows | Windows 10 version 1903 (build 18362) or later, or Windows 11, on x64. The driver requires .NET Framework 4.8 or 4.8.1. |
 | Linux | A glibc-based distribution on x86_64 or ARM64. The driver needs PyGObject, AT-SPI 2, the graphical session's D-Bus, and the X11 and xkbcommon libraries. Debian 13's AT-SPI passed verification. The version shipped with Debian 12 can time out when listing apps. Screenshots and simulated mouse and keyboard input require an X11 session. On Wayland, Computer Use can read the accessibility tree and perform the accessibility actions exposed by the app. The minimum glibc version for a prebuilt wheel depends on the artifact. |
 

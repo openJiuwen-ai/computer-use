@@ -8,6 +8,15 @@ import Darwin
 // context. It only invokes one public running-process activation and exits.
 if let status = ForegroundActivation.runIfRequested(CommandLine.arguments) { exit(status) }
 
+if let index = CommandLine.arguments.firstIndex(of: "--connect-stdio") {
+    guard index + 1 < CommandLine.arguments.count else { exit(1) }
+    do { try AppConnection.attach(CommandLine.arguments[index + 1]) }
+    catch {
+        diagnose("driver connection: \(error)")
+        exit(1)
+    }
+}
+
 let app = NSApplication.shared
 // AppKit may activate an accessory app while finishing launch if its first
 // request already created a window. Keep launch prohibited, then enable the
@@ -18,7 +27,7 @@ signal(SIGPIPE, SIG_IGN)
 
 if CommandLine.arguments.contains("--check-permissions") || CommandLine.arguments.contains("--request-permissions") {
     do {
-        try writeJSON(Driver.permissionStatus(request: CommandLine.arguments.contains("--request-permissions")))
+        try writeJSON(DesktopPermission.status(request: CommandLine.arguments.contains("--request-permissions")))
     } catch { exit(1) }
     exit(0)
 }

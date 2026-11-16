@@ -258,7 +258,7 @@ import ApplicationServices
         let began = Int64(Date().timeIntervalSince1970 * 1000)
         let appChange = try changeStatus(app, application: application).stamp
         var roots = [[String: Any]](), reasons = [String]()
-        if AXIsProcessTrusted() {
+        if DesktopPermission.accessibility.granted {
             _ = state.accessibilityActivation.ensure(app)
             let element = AXUIElementCreateApplication(app.processIdentifier)
             AXMessaging.configure(element)
@@ -285,7 +285,8 @@ import ApplicationServices
                 }
             }
         } else {
-            reasons.append("accessibility permission unavailable")
+            DesktopPermission.accessibility.guideOnce()
+            reasons.append(DesktopPermission.accessibility.settingsHelp)
         }
         try BackgroundTarget(app).validate()
         try RequestDiagnostics.checkCancellation()
@@ -752,6 +753,10 @@ import ApplicationServices
             rootDiscoveryComplete = false
         }
         if !windowServices.trusted() {
+            if profile == .accessibility {
+                DesktopPermission.accessibility.guideOnce()
+                reasons.append(DesktopPermission.accessibility.settingsHelp)
+            }
             reasons.append("accessibility permission unavailable; native windows are retained")
             rootDiscoveryComplete = false
         }

@@ -32,7 +32,9 @@ def capture_wheel(monkeypatch):
 def driver_archive(directory, target, member):
     data = b"driver fixture"
     members = [member]
-    if target == "windows-x86_64":
+    if target.startswith("macos-"):
+        members.append(member.rsplit("/MacOS/", 1)[0] + "/Info.plist")
+    elif target == "windows-x86_64":
         members.extend((
             "os_adapter/windows/.build/computer-use-capture.exe",
             "os_adapter/windows/.build/Interop.NativeUIA.dll",
@@ -79,7 +81,7 @@ def test_source_rust_build_failure_keeps_wheel_installable(capture_wheel, monkey
 
 
 @pytest.mark.parametrize(("target", "member", "platform_tag"), [
-    ("macos-x86_64", "os_adapter/macos/.build/ComputerUseDriver.app/Contents/MacOS/computer-use-driver", "macosx_14_0_x86_64"),
+    ("macos-x86_64", "os_adapter/macos/.build/Jiuwen CUA.app/Contents/MacOS/computer-use-driver", "macosx_14_0_x86_64"),
     ("linux-x86_64", "os_adapter/linux/.build/driver-0.0.1-py3-none-any.whl", "linux_x86_64"),
     ("windows-x86_64", "os_adapter/windows/.build/computer-use-driver.exe", "win_amd64"),
 ])

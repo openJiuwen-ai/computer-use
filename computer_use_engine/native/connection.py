@@ -191,6 +191,14 @@ class Connection:
             )
         self._buffer, self._diagnostic, self._next_id = bytearray(), "", 1
         self._traces = {}
+        provenance = startup_provenance(command)
+        if sys.platform == "darwin" and (bundle := driver.get("app_bundle")) is not None:
+            from computer_use.native.macos_app import start_app
+
+            child = await start_app(bundle, lifetime_fd=4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1)
+            self._attach(child, command, provenance, uses_eof=True)
+            return
+
         windows = sys.platform == "win32"
         # Windows uses native stdio handles. The POSIX 3/4 descriptor bridge
         # and preview pipe are not part of its driver's transport contract.
@@ -199,7 +207,6 @@ class Connection:
         lifetime = 4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1
         if preview is not None:
             read_fd, write_fd = os.pipe()
-        provenance = startup_provenance(command)
         try:
             env = dict(os.environ)
             if windows:
@@ -233,15 +240,21 @@ class Connection:
         finally:
             if write_fd >= 0:
                 os.close(write_fd)
-        self._child = child
-        self._child_uses_eof = windows
+        self._attach(child, command, provenance, uses_eof=windows)
         if preview is not None:
             reader = asyncio.StreamReader()
             transport, _ = await asyncio.get_running_loop().connect_read_pipe(
                 lambda: asyncio.StreamReaderProtocol(reader), os.fdopen(read_fd, "rb", buffering=0)
             )
-            self._preview_transport = transport
-            self._track(read_previews(reader, preview))
+            if self._child is child:
+                self._preview_transport = transport
+                self._track(read_previews(reader, preview))
+            else:
+                transport.close()
+
+    def _attach(self, child, command, provenance, *, uses_eof):
+        self._child = child
+        self._child_uses_eof = uses_eof
         diagnostic(
             dict(
                 kind="connection",
@@ -262,7 +275,8 @@ class Connection:
         child = self._child
         if child is not None and child.returncode is None:
             # TerminateProcess cannot run the driver's finally blocks. EOF
-            # lets its reader cancel native work and release paired input.
+                # lets the native reader cancel work and release paired input,
+                # including when Launch Services owns the process.
             try:
                 if self._child_uses_eof:
                     child.stdin.close()
@@ -464,8 +478,11 @@ class Connection:
         # an unrelated successor that another scope has already established.
         self._check_retained_session()
         try:
-            remaining()
-            await self._connect()
+            try:
+                async with asyncio.timeout(remaining() / 1000):
+                    await self._connect()
+            except TimeoutError as error:
+                raise local_failure("native driver launch timed out", "execution_failed", "connection") from error
             await self._negotiate(remaining())
         except asyncio.CancelledError:
             self.close(RuntimeError("connection request cancelled before dispatch"))

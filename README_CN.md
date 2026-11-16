@@ -30,7 +30,7 @@ Computer Use 是 openJiuwen 智能体系统服务层（Agent System Service）�
 
 | 平台 | 系统版本与运行条件 |
 | --- | --- |
-| macOS | macOS 14.0（Sonoma）及以上，支持 Apple 芯片和 Intel Mac。读取无障碍树和控制应用需要辅助功能权限，截图需要屏幕录制权限。 |
+| macOS | macOS 14.0（Sonoma）及以上，支持 Apple 芯片和 Intel Mac。首次使用时，按系统提示为 **Jiuwen CUA** 开启辅助功能和屏幕录制。 |
 | Windows | Windows 10 1903（Build 18362）及以上，或 Windows 11，均为 x64。驱动需要 .NET Framework 4.8 或 4.8.1。 |
 | Linux | 使用 glibc 的 x86_64 或 ARM64 Linux。驱动需要 PyGObject、AT-SPI 2、图形会话的 D-Bus，以及 X11 和 xkbcommon 库。Debian 13 自带的 AT-SPI 已验证，Debian 12 自带的版本可能导致应用枚举超时。截图和模拟鼠标键盘输入需要 X11 会话。Wayland 下可读取应用提供的无障碍树并执行其无障碍动作。预编译包的 glibc 版本要求取决于具体制品。 |
 

@@ -25,7 +25,7 @@ uv run --python 3.12 --no-sync computer-use-build
 uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-macOS 可运行 `uv run --python 3.12 --no-sync computer-use-permissions --request` 请求缺失权限，在**系统设置 → 隐私与安全**中批准后重新检查。请使用与启动 SDK 或其 MCP 接入层相同的终端或宿主连接执行这些命令。
+macOS 在首次用到缺失权限时发起系统授权请求。也可以先运行 `uv run --python 3.12 --no-sync computer-use-permissions --request`，按提示在**系统设置 → 隐私与安全**中为 **Jiuwen CUA** 授权，然后重新检查。录屏列表缺少该项时，请用权限命令给出的 App 路径添加。
 
 ## 3. 接入自己的 Agent
 

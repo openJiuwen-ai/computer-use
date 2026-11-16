@@ -1,8 +1,6 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import AppKit
-@preconcurrency import ApplicationServices
-import CoreGraphics
 
 @MainActor final class Driver {
     private let session = UUID().uuidString
@@ -23,24 +21,6 @@ import CoreGraphics
             self?.state.appObserver.stop()
             self?.requests.cancelActive()
         }
-    }
-
-    static func permissionStatus(request: Bool = false) -> [String: Any] {
-        if request {
-            // Only the explicit setup command may prompt. Requesting access is
-            // not evidence of a grant: AX prompts asynchronously, and macOS
-            // can require restarting the responsible launcher after approval.
-            if !AXIsProcessTrusted() {
-                let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-                _ = AXIsProcessTrustedWithOptions(options)
-            }
-            if !CGPreflightScreenCaptureAccess() { _ = CGRequestScreenCaptureAccess() }
-            if !CGPreflightPostEventAccess() { _ = CGRequestPostEventAccess() }
-        }
-        return [
-            "accessibility": AXIsProcessTrusted(), "screenCapture": CGPreflightScreenCaptureAccess(),
-            "input": CGPreflightPostEventAccess(), "executable": Bundle.main.executablePath ?? CommandLine.arguments[0]
-        ]
     }
 
     func shutdown(code: Int32) {
