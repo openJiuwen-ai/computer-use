@@ -7,16 +7,22 @@ import ctypes
 import os
 import sys
 
+DESKTOP_UNAVAILABLE = 3
+
 
 def _display_reachable(*, wayland: bool) -> bool:
+    roundtrip = None
     try:
         if wayland:
             library = ctypes.CDLL("libwayland-client.so.0")
             connect, disconnect = library.wl_display_connect, library.wl_display_disconnect
+            roundtrip = library.wl_display_roundtrip
+            roundtrip.argtypes = [ctypes.c_void_p]
+            roundtrip.restype = ctypes.c_int
         else:
             library = ctypes.CDLL("libX11.so.6")
             connect, disconnect = library.XOpenDisplay, library.XCloseDisplay
-    except OSError:
+    except (OSError, AttributeError):
         return False
     connect.argtypes = [ctypes.c_char_p]
     connect.restype = ctypes.c_void_p
@@ -26,12 +32,7 @@ def _display_reachable(*, wayland: bool) -> bool:
     if not display:
         return False
     try:
-        if not wayland:
-            return True
-        roundtrip = library.wl_display_roundtrip
-        roundtrip.argtypes = [ctypes.c_void_p]
-        roundtrip.restype = ctypes.c_int
-        return roundtrip(display) >= 0
+        return roundtrip is None or roundtrip(display) >= 0
     finally:
         disconnect(display)
 
@@ -70,11 +71,13 @@ def _accessibility_reachable() -> bool:
 
 
 def desktop_available() -> bool:
+    if os.environ.get("DISPLAY") and _display_reachable(wayland=False):
+        return True
     wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland" or bool(os.environ.get("WAYLAND_DISPLAY"))
-    if (wayland or os.environ.get("DISPLAY")) and _display_reachable(wayland=wayland):
+    if wayland and _display_reachable(wayland=True):
         return True
     return _accessibility_reachable()
 
 
 if __name__ == "__main__":
-    sys.exit(0 if desktop_available() else 1)
+    sys.exit(0 if desktop_available() else DESKTOP_UNAVAILABLE)

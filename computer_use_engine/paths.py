@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -11,6 +12,10 @@ import tempfile
 from functools import lru_cache
 from pathlib import Path
 from time import sleep
+
+from .native.linux_desktop import DESKTOP_UNAVAILABLE
+
+_LOG = logging.getLogger(__name__)
 
 LINUX_RUNTIME = Path("os_adapter/linux/.build/runtime")
 _MACOS_DRIVER = Path("os_adapter/macos/.build/ComputerUseDriver.app/Contents/MacOS/computer-use-driver")
@@ -62,11 +67,8 @@ def installed_read_engine_unavailable_reason() -> str | None:
 def _linux_desktop_unavailable_reason() -> str | None:
     if sys.platform != "linux":
         return None
-    if not (
-        any(os.environ.get(name) for name in ("DISPLAY", "WAYLAND_DISPLAY", "AT_SPI_BUS_ADDRESS",
-                                              "DBUS_SESSION_BUS_ADDRESS"))
-        or os.environ.get("XDG_SESSION_TYPE") == "wayland"
-    ):
+    session_variables = ("DISPLAY", "WAYLAND_DISPLAY", "AT_SPI_BUS_ADDRESS", "DBUS_SESSION_BUS_ADDRESS")
+    if os.environ.get("XDG_SESSION_TYPE") != "wayland" and not any(map(os.getenv, session_variables)):
         return "backend_missing"
     probe = Path(__file__).with_name("native") / "linux_desktop.py"
     try:
@@ -74,13 +76,22 @@ def _linux_desktop_unavailable_reason() -> str | None:
             [linux_python(), "-I", str(probe)],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=2,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            errors="replace",
+            timeout=4,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return "backend_missing"
-    return None if result.returncode == 0 else "backend_missing"
+    except subprocess.TimeoutExpired:
+        _LOG.warning("Linux desktop availability probe timed out")
+    except OSError as error:
+        _LOG.warning("Could not launch Linux desktop availability probe: %s", error)
+    else:
+        if result.returncode == 0:
+            return None
+        if result.returncode != DESKTOP_UNAVAILABLE:
+            _LOG.warning("Linux desktop availability probe exited with %d: %s", result.returncode, result.stderr.strip())
+    return "backend_missing"
 
 
 def installed_backend_unavailable_reason() -> str | None:

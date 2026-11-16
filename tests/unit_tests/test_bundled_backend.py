@@ -8,12 +8,15 @@ import subprocess
 import sys
 from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 from zipfile import ZipFile
 
 import pytest
 import setuptools
 from computer_use import paths
 from computer_use.errors import ComputerUseError
+from computer_use.native import linux_desktop
 from computer_use.native.connection import Connection
 from computer_use_native_tools import native
 
@@ -335,6 +338,72 @@ def test_linux_installed_driver_reports_missing_desktop_without_preparing_runtim
     assert driver.is_file()
     assert not (resources / "backend-status.json").exists()
     assert not home.exists()
+
+
+@pytest.mark.parametrize(("x11_available", "wayland_available"), [(True, False), (False, True), (False, False)])
+def test_linux_desktop_checks_both_displays(monkeypatch, x11_available, wayland_available):
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+    monkeypatch.setattr(linux_desktop, "_display_reachable", lambda *, wayland: (
+        wayland_available if wayland else x11_available
+    ))
+    monkeypatch.setattr(linux_desktop, "_accessibility_reachable", lambda: False)
+
+    assert linux_desktop.desktop_available() is (x11_available or wayland_available)
+
+
+def test_linux_display_with_missing_library_symbol_is_unavailable(monkeypatch):
+    library = SimpleNamespace(wl_display_connect=Mock(return_value=1), wl_display_disconnect=Mock())
+    monkeypatch.setattr(linux_desktop.ctypes, "CDLL", lambda _: library)
+
+    assert linux_desktop._display_reachable(wayland=True) is False
+    library.wl_display_connect.assert_not_called()
+
+
+@pytest.mark.parametrize(("editable", "probe_code", "reason", "diagnostic"), [
+    (True, "", None, ""),
+    (False, "", None, ""),
+    (False, "raise SystemExit(3)", "backend_missing", ""),
+    (False, "raise RuntimeError('probe crashed')", "backend_missing", "probe crashed"),
+])
+def test_linux_backend_distinguishes_desktop_absence_and_probe_failure(
+    installed, monkeypatch, caplog, editable, probe_code, reason, diagnostic,
+):
+    resources, home = installed
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setenv("COMPUTER_USE_PYTHON", sys.executable)
+    probe = resources.parent / "native/linux_desktop.py"
+    probe.parent.mkdir()
+    probe.write_text(probe_code, encoding="utf-8")
+    if editable:
+        monkeypatch.setattr(paths, "checkout_root", lambda: resources.parent.parent)
+    else:
+        (resources / "backend.json").write_text("{}", encoding="utf-8")
+        driver = resources / paths.LINUX_RUNTIME / "__main__.py"
+        driver.parent.mkdir(parents=True)
+        driver.touch()
+
+    assert paths.installed_backend_unavailable_reason() == reason
+    if diagnostic:
+        assert diagnostic in caplog.text
+    else:
+        assert not caplog.records
+    assert not home.exists()
+
+
+def test_linux_desktop_probe_timeout_reports_unavailable(monkeypatch, caplog, tmp_path):
+    monkeypatch.setattr(paths, "checkout_root", lambda: tmp_path)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setenv("COMPUTER_USE_PYTHON", sys.executable)
+
+    def expire(command, *, timeout, **_):
+        raise subprocess.TimeoutExpired(command, timeout)
+
+    monkeypatch.setattr(subprocess, "run", expire)
+    assert paths.installed_backend_unavailable_reason() == "backend_missing"
+    assert "Linux desktop availability probe timed out" in caplog.text
 
 
 @pytest.fixture
