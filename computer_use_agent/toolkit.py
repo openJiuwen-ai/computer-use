@@ -4,6 +4,7 @@
 """Native openJiuwen tools backed by the existing Computer Use MCP service."""
 
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -17,6 +18,8 @@ from openjiuwen.core.foundation.tool.schema import ToolOutput
 from openjiuwen.core.runner.runner import Runner
 
 from .activity import DesktopPause, build_idle_probe
+from .compile.calc import ID as COMPILED_PROGRAM_ID
+from .compile.compiler import Compiler, describe_result
 from .config import AgentConfig
 from .connection import McpConnection
 from .prompt import system_prompt
@@ -76,7 +79,7 @@ class DesktopTool(Tool):
 class ComputerUseToolkit:
     """Pass tools to create_deep_agent; retain the toolkit for the conversation."""
 
-    def __init__(self, config: AgentConfig | None = None, *, on_event=None, stderr=None):
+    def __init__(self, config: AgentConfig | None = None, *, on_event=None, stderr=None, compile_task=None):
         self.id = uuid4().hex
         self.config = config or AgentConfig()
         self.connection = McpConnection(self.config.mcp_config(), stderr=stderr)
@@ -86,6 +89,16 @@ class ComputerUseToolkit:
         self._desktop_check_lock = asyncio.Lock()
         self._pause = DesktopPause(build_idle_probe()) if self.config.pause_on_user_input else None
         self._route_depth = 0
+        self._compile_task = compile_task
+        self.compiler = (
+            Compiler(
+                Path(self.config.compile_dir or Path.home() / ".computer-use" / "agent" / "compile"),
+                self._run_program_code,
+                self.emit,
+            )
+            if self.config.compile_enabled
+            else None
+        )
         self.routing = self._build_router()
         self.tools = [
             DesktopTool(
@@ -122,6 +135,43 @@ class ComputerUseToolkit:
                     required=["task"],
                 )
             )
+        if self.compiler is not None:
+            self.tools.append(
+                DesktopTool(
+                    self,
+                    name="run_compiled",
+                    description="Run a compiled function whose offered description matches the entire current request.",
+                    properties={
+                        "program_id": {"type": "string", "description": "Program ID from the offered catalog."},
+                        "parameters": {
+                            "type": "object",
+                            "description": "Use the offered input schema. Supply {} for a function without inputs.",
+                        },
+                        "reply_language": {
+                            "type": "string",
+                            "enum": ["zh", "en"],
+                            "description": (
+                                "For a complete matching task, use zh for Chinese or en for English. "
+                                "The Agent returns the verified result in this language on success."
+                            ),
+                        },
+                    },
+                    required=["program_id", "parameters"],
+                )
+            )
+            if self._compile_task is not None:
+                self.tools.append(
+                    DesktopTool(
+                        self,
+                        name="compile_task",
+                        description=(
+                            "Compile the last completed desktop task in this conversation. "
+                            "Use only on explicit request."
+                        ),
+                        properties={},
+                        required=[],
+                    )
+                )
 
     def _build_router(self) -> Router | None:
         routing = self.config.routing
@@ -187,7 +237,57 @@ class ComputerUseToolkit:
                 raise RuntimeError(detail[-1000:] or "The backend could not list desktop applications.")
             self._desktop_checked = True
 
-    async def call(self, name, inputs):
+    async def call(self, name, inputs, *, _program=False):
+        if name == "compile_task":
+            self.emit("tool_call", {"name": name, "arguments": inputs})
+            source = self.compiler.turn.get() if self.compiler is not None else None
+            chinese = source is not None and any("\u4e00" <= char <= "\u9fff" for char in source.query)
+            try:
+                if source is None or not source.can_compile or self._compile_task is None:
+                    raise ValueError("No completed desktop task was found in this conversation")
+                result = await self._compile_task(conversation_id=source.conversation_id)
+                text = describe_result(result, chinese=chinese)
+                success = True
+            except (OSError, ValueError, RuntimeError) as error:
+                success, text = False, str(error)
+            self.emit(
+                "tool_result",
+                {
+                    "name": name,
+                    "result": {
+                        "isError": not success,
+                        "content": [{"type": "text", "text": text}],
+                    },
+                },
+            )
+            return ToolOutput(success=success, data={"content": text}, error=None if success else text)
+        if name == "run_compiled":
+            self.emit("tool_call", {"name": name, "arguments": inputs})
+            result = await self.run_program(inputs["program_id"], inputs["parameters"])
+            success = result["status"] == "succeeded"
+            text = result["detail"]
+            answer = None
+            if success and "value" in result:
+                value = result["value"]
+                text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+            if "publication" in result:
+                source = self.compiler.turn.get() if self.compiler is not None else None
+                chinese = source is not None and any("\u4e00" <= char <= "\u9fff" for char in source.query)
+                text += "\n" + describe_result(result["publication"], chinese=chinese)
+            if success and inputs["program_id"] == COMPILED_PROGRAM_ID:
+                text = "The saved workbook was independently verified. " + text
+                answer = _compiled_answer(result["parameters"], inputs.get("reply_language"))
+            if result["fallback_allowed"]:
+                text += "\nThe program sent no desktop input. Continue with the regular task workflow."
+            elif not success:
+                text += "\nObserve the original target and determine the remaining work before making changes."
+            self.emit(
+                "tool_result",
+                {"name": name, "result": {"isError": not success, "content": [{"type": "text", "text": text}]}},
+            )
+            return ToolOutput(
+                success=success, data={"content": text, "program_result": result, "verified_answer": answer}
+            )
         if name == "route_task":
             self.emit("tool_call", {"name": name, "arguments": inputs})
             output = await self.route_task(inputs)
@@ -210,21 +310,28 @@ class ComputerUseToolkit:
             if advisory is not None:
                 result = {"isError": True, "content": [{"type": "text", "text": advisory}]}
                 self.emit("tool_result", {"name": name, "result": result})
-                return ToolOutput(success=False, data={"content": advisory}, error=advisory)
+                return ToolOutput(
+                    success=False,
+                    data={"content": advisory, "execution_progress": {"completion": "not_started"}},
+                    error=advisory,
+                )
         started = time.monotonic()
         try:
             result = await self.connection.call(name, inputs)
         except asyncio.CancelledError:
             self.emit("tool_cancelled", {"name": name, "effect": "possible"})
-            self._record_gui_sample(name, inputs, started, None)
+            if not _program:
+                self._record_gui_sample(name, inputs, started, None)
             raise
         except Exception as error:
             logger.exception("Computer Use tool transport failed")
             self.emit("tool_error", {"name": name, "error": str(error), "effect": "possible"})
-            self._record_gui_sample(name, inputs, started, None)
+            if not _program:
+                self._record_gui_sample(name, inputs, started, None)
             raise
         completed = time.monotonic()
-        self._record_gui_sample(name, inputs, started, result.isError is False)
+        if not _program:
+            self._record_gui_sample(name, inputs, started, result.isError is False)
         raw = result.model_dump(mode="json", by_alias=True, exclude_none=True)
         self.emit("tool_result", {"name": name, "result": raw})
         converted = extract_mcp_tool_result_content(result, include_image_content=True, tool_name=name)
@@ -253,6 +360,14 @@ class ComputerUseToolkit:
             if pause is not None:
                 pause.record_input(started, completed, progress)
         return ToolOutput(success=not result.isError, data=data, error=getattr(converted, "error", None))
+
+    async def _run_program_code(self, title, code):
+        return await self.call("computer_use", {"title": title, "code": code}, _program=True)
+
+    async def run_program(self, program_id, parameters, *, version=None):
+        if self.compiler is None:
+            raise RuntimeError("Compile is disabled")
+        return await self.compiler.run(program_id, parameters, version=version)
 
     def _record_gui_sample(self, name, inputs, started, success):
         routing = self.routing
@@ -350,6 +465,22 @@ class ComputerUseToolkit:
             if exc_type is None:
                 raise
             logger.exception("Computer Use cleanup failed while handling %s", exc_type.__name__)
+
+
+def _compiled_answer(parameters, language):
+    file = Path(parameters["document"]).name
+    sheet, cells, decimals = parameters["sheet"], parameters["range"], parameters["decimals"]
+    if language == "zh":
+        return (
+            f"已回读 {file}，确认 {sheet} 工作表的 {cells} 已保存为显示 {decimals} 位小数。"
+            "原值和范围外的数字格式均保留。"
+        )
+    if language == "en":
+        return (
+            f"Verified the saved workbook {file}. {sheet}!{cells} displays {decimals} decimal places. "
+            "Cell values and other number formats were preserved."
+        )
+    return None
 
 
 def _route_payload(result):

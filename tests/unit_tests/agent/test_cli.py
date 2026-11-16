@@ -86,10 +86,16 @@ def test_terminal_titles_and_debug_do_not_duplicate_final_answer():
     output = io.StringIO()
     terminal = Terminal(console=Console(file=output, color_system=None))
     terminal.event("tool_call", {"name": "computer_use", "arguments": {"title": "Open form", "code": "secret_code"}})
+    terminal.event("tool_call", {"name": "computer_use", "arguments": {"code": "computer.list_apps()"}})
+    terminal.event("tool_call", {"name": "computer_use", "arguments": {"code": "editor.type_text('private text')"}})
     terminal.chunk(SimpleNamespace(type="llm_output", payload={"content": "Done"}))
     terminal.chunk(SimpleNamespace(type="answer", payload={"content": "Done"}), already_streamed=True)
     terminal.finish()
     assert "Open form" in output.getvalue()
+    assert "列出应用" in output.getvalue()
+    assert "输入文字" in output.getvalue()
+    assert "● computer_use" not in output.getvalue()
+    assert "private text" not in output.getvalue()
     assert "secret_code" not in output.getvalue()
     assert output.getvalue().count("Done") == 1
 
@@ -104,7 +110,9 @@ def test_redirected_multiturn_input():
 
 
 def test_cli_single_task(model_server, tmp_path, monkeypatch, capsys):
-    server = model_server([tool_call("print('cli evidence')"), answer("CLI task complete")])
+    reply = tool_call("print('cli evidence')")
+    reply["tool_calls"][0]["function"]["arguments"] = json.dumps({"code": "print('cli evidence')"})
+    server = model_server([reply, answer("CLI task complete")])
     path = tmp_path / "config.json"
     path.write_text(
         json.dumps(
@@ -115,7 +123,11 @@ def test_cli_single_task(model_server, tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("API_BASE", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     assert asyncio.run(main(["--config", str(path), "--no-desktop-check", "Run the CLI test"])) == 0
-    assert "CLI task complete" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "CLI task complete" in output
+    assert "执行桌面脚本" in output
+    tools = {tool["function"]["name"]: tool["function"] for tool in server.requests[0]["tools"]}
+    assert tools["computer_use"]["parameters"]["required"] == ["code"]
     records = list((tmp_path / ".computer-use/agent/runs").glob("*/events.jsonl"))
     assert len(records) == 1
     assert "cli evidence" in records[0].read_text()
@@ -172,13 +184,14 @@ def test_interactive_commands_preserve_execution_session(model_server, tmp_path,
         monkeypatch.delenv(key, raising=False)
     result = subprocess.run(
         [sys.executable, "-m", "computer_use_agent.cli", "--config", str(path)],
-        input="/debug\nInitialize counter\n/normal\nIncrement counter\n/compact\n/new\n/exit\n",
+        input="/compile\n/debug\nInitialize counter\n/normal\nIncrement counter\n/compact\n/new\n/exit\n",
         text=True,
         capture_output=True,
         timeout=40,
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "No completed desktop task was found for Compile" in result.stdout
     assert "Counter is 8" in result.stdout
     assert "已开始新对话" in result.stdout
     assert "Python 会话保持" in result.stdout

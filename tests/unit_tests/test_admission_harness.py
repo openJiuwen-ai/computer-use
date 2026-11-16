@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from computer_use.programs.admission import Registry
+from computer_use_native_tools.evaluation.program_admission import Registry
 from computer_use_native_tools.evaluation.admission import (
     instance_fingerprint,
     main,

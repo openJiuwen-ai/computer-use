@@ -9,7 +9,6 @@ SQLite owns lifecycle and split assignment atomically; contention fails rather
 than retrying. Programs still execute through their existing SDK composition.
 """
 
-import hashlib
 import json
 import re
 import sqlite3
@@ -19,14 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-
-def canonical(value) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-
-
-def fingerprint(value) -> str:
-    """Hash semantic parameters, excluding random episode IDs/session references."""
-    return hashlib.sha256(canonical(value).encode()).hexdigest()
+from computer_use_agent.compile.artifact import canonical, fingerprint
+from computer_use_agent.compile.model import Selection
 
 
 def _sha(value):
@@ -109,15 +102,6 @@ class HumanReview:
         _sha(self.packet_sha256)
         if not self.reviewer.strip() or not self.authorization_reference.strip() or self.decision != "approve":
             raise ValueError("An explicit human approval and its source are required")
-
-
-@dataclass(frozen=True)
-class Selection:
-    allowed: bool
-    reason: str
-    state: str | None
-    definition_sha256: str
-    review: dict | None = None
 
 
 class Registry:

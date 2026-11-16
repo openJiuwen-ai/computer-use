@@ -176,6 +176,7 @@ class ExecutionSession:
             startedAt=loop.time(),
             output=OutputBuffer(),
             receipts=deque(maxlen=8),
+            native_commands=0,
             future=future,
             timer=None,
             cancel=None,
@@ -386,6 +387,8 @@ class ExecutionSession:
                             and message.get("executionId") == self._pending["id"]
                             and event.get("kind") in ("command_start", "command_end")
                         ):
+                            if event["kind"] == "command_start":
+                                self._pending["native_commands"] += 1
                             self._pending["progress"]()
                 elif "output" in message:
                     pending = self._pending
@@ -481,6 +484,7 @@ class ExecutionSession:
                 **self._journal.metadata(),
                 "executionId": pending["id"],
                 "durationMs": duration,
+                "nativeCommandCount": pending["native_commands"],
                 "progress": self._last_progress,
                 **({"title": pending["title"]} if pending["title"] else {}),
             },

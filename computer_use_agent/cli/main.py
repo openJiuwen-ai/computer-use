@@ -30,15 +30,21 @@ def parser():
     result.add_argument("--provider")
     result.add_argument("--api-base")
     result.add_argument(
-        "--allow-global-input", action=argparse.BooleanOptionalAction, default=None,
+        "--allow-global-input",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Allow global mouse and keyboard input for the local MCP session (default: enabled).",
     )
     result.add_argument(
-        "--desktop-check", action=argparse.BooleanOptionalAction, default=None,
+        "--desktop-check",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Check the desktop backend before the first model request (default: enabled).",
     )
     result.add_argument(
-        "--pause-on-user-input", action=argparse.BooleanOptionalAction, default=None,
+        "--pause-on-user-input",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="Pause desktop dispatch while the user is active (default: disabled).",
     )
     result.add_argument("--max-iterations", type=int)
@@ -105,10 +111,28 @@ async def converse(agent, *, task, terminal, journal):
                 )
                 continue
             if command == "/help":
-                terminal.line("/debug · /normal · /compact · /new · /exit\n回车发送；Ctrl+J 或 Alt+回车换行。")
+                terminal.line(
+                    "/compile [任务 ID] · /debug · /normal · /compact · /new · /exit\n"
+                    "回车发送；Ctrl+J 或 Alt+回车换行。"
+                )
                 continue
             try:
-                await turn(agent, message, conversation_id, terminal, journal)
+                parts = command.split()
+                if parts[0] == "/compile":
+                    from ..compile.compiler import describe_result
+
+                    if len(parts) > 2:
+                        raise ValueError("用法 /compile [任务 ID]")
+                    terminal.line("正在编译函数…")
+                    result = await agent.compile_task(
+                        parts[1] if len(parts) == 2 else None, conversation_id=conversation_id
+                    )
+                    terminal.line(
+                        describe_result(result, chinese=True),
+                        style="green" if result["status"] == "published" else "yellow",
+                    )
+                else:
+                    await turn(agent, message, conversation_id, terminal, journal)
             except Exception as error:
                 logger.exception("Conversation turn failed")
                 message = journal.redact(str(error))

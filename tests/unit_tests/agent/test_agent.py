@@ -45,6 +45,11 @@ def test_native_agent_multi_turn_and_compaction(model_server, tmp_path):
 
     ids = asyncio.run(run())
     assert not server.replies
+    first_prompt = "\n".join(
+        message["content"] for message in server.requests[0]["messages"] if message["role"] == "system"
+    )
+    assert "one computer_use script" in first_prompt
+    assert "points from an App screenshot" in first_prompt
     assert any("Initialize the counter" in json.dumps(request) for request in server.requests[2:])
     assert (
         sum(

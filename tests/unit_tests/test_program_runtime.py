@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from computer_use.errors import ComputerUseError
-from computer_use.programs.model import Check, conclude
-from computer_use.programs.pipeline import execute
+from computer_use_agent.compile.model import Check, conclude
+from computer_use_agent.compile.pipeline import execute
 from program_fixtures import artifact_at
 from pathlib import Path
 from tempfile import TemporaryDirectory
