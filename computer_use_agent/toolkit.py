@@ -32,7 +32,46 @@ from .routing import (
     ScoreWeights,
     render_plan,
 )
+from .routing.executors import CodeOutcome
 from .routing.paths import ExecutionStatus
+
+
+def _meta_receipts(raw):
+    """Structured action receipts from a computer_use tool-result payload."""
+    meta = raw.get("_meta") if isinstance(raw, dict) else None
+    computer_use = meta.get("computer-use") if isinstance(meta, dict) else None
+    receipts = computer_use.get("receipts") if isinstance(computer_use, dict) else None
+    if not isinstance(receipts, list):
+        return ()
+    return tuple(item for item in receipts if isinstance(item, dict))
+
+
+def _gui_disturbance_cost(receipts):
+    """Disturbance charge for a free GUI sample: every receipt that disturbed the desktop
+    (global input preparation, foreground moves) adds a small charge; quiet samples return
+    None so the caller records only the neutral per-op prior."""
+    charged = 0.0
+    for receipt in receipts or ():
+        if not isinstance(receipt, dict):
+            continue
+        impact = receipt.get("impact")
+        if not isinstance(impact, dict):
+            continue
+        attempts = impact.get("attempts")
+        if not isinstance(attempts, list):
+            continue
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            preparation = attempt.get("preparation_potential")
+            prepared_devices = ("mouse", "keyboard", "activation", "clipboard")
+            disturbed = isinstance(preparation, dict) and any(preparation.get(key) == "yes" for key in prepared_devices)
+            actual = attempt.get("actual")
+            foreground = isinstance(actual, dict) and actual.get("foreground_changed") == "yes"
+            if disturbed or foreground:
+                charged += 0.001
+    return charged or None
+
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +81,7 @@ eligible path. Call this before manipulating the UI when the task might be achie
 route. It executes the chosen registered path itself and reports the outcome. If it chooses gui://fallback,
 no GUI task has been executed; continue with computer_use. If the decision is refuse, explain the reason and ask
 the user instead of forcing operations. Pass subtasks to split the task into independently routed subtasks.
+Pass choose to execute a specific path id from the returned candidate list (eligibility rules still apply).
 Never retry a route whose effect is unknown."""
 
 
@@ -117,6 +157,10 @@ class ComputerUseToolkit:
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "Optional decomposition; each subtask is routed independently.",
+                        },
+                        "choose": {
+                            "type": "string",
+                            "description": "Optional path id from a previous candidate list; overrides the top score.",
                         },
                     },
                     required=["task"],
@@ -216,16 +260,16 @@ class ComputerUseToolkit:
             result = await self.connection.call(name, inputs)
         except asyncio.CancelledError:
             self.emit("tool_cancelled", {"name": name, "effect": "possible"})
-            self._record_gui_sample(name, inputs, started, None)
+            self._record_gui_sample(name, inputs, started, None, ())
             raise
         except Exception as error:
             logger.exception("Computer Use tool transport failed")
             self.emit("tool_error", {"name": name, "error": str(error), "effect": "possible"})
-            self._record_gui_sample(name, inputs, started, None)
+            self._record_gui_sample(name, inputs, started, None, ())
             raise
         completed = time.monotonic()
-        self._record_gui_sample(name, inputs, started, result.isError is False)
         raw = result.model_dump(mode="json", by_alias=True, exclude_none=True)
+        self._record_gui_sample(name, inputs, started, result.isError is False, _meta_receipts(raw))
         self.emit("tool_result", {"name": name, "result": raw})
         converted = extract_mcp_tool_result_content(result, include_image_content=True, tool_name=name)
         data = converted.data if hasattr(converted, "data") else {"content": converted or ""}
@@ -254,18 +298,22 @@ class ComputerUseToolkit:
                 pause.record_input(started, completed, progress)
         return ToolOutput(success=not result.isError, data=data, error=getattr(converted, "error", None))
 
-    def _record_gui_sample(self, name, inputs, started, success):
+    def _record_gui_sample(self, name, inputs, started, success, receipts):
         routing = self.routing
         if routing is None or name != "computer_use" or self._route_depth > 0:
             return
         if not self.config.routing.auto_record_gui:
             return
+        # Charge on top of the neutral per-op prior so disturbed samples cost more than quiet
+        # ones; quiet samples still record the base prior, keeping the EMA unbiased.
+        base = routing.store.priors.cost_prior.get(PathKind.GUI, 0.0)
         routing.store.record(
             OutcomeRecord(
                 path_id=GUI_FALLBACK_ID,
                 task=str(inputs.get("title") or "")[:200],
                 latency_s=time.monotonic() - started,
                 success=success,
+                cost=base + (_gui_disturbance_cost(receipts) or 0.0),
                 detail="operation-level sample of free computer_use",
             ),
             PathKind.GUI,
@@ -277,7 +325,10 @@ class ComputerUseToolkit:
             output = await self.call("computer_use", {"title": "Routed path execution", "code": code})
         finally:
             self._route_depth -= 1
-        return output.success, output.data.get("content", "")
+        data = output.data if isinstance(output.data, dict) else {}
+        mcp_result = data.get("mcp_result")
+        receipts = _meta_receipts(mcp_result) if isinstance(mcp_result, dict) else ()
+        return CodeOutcome(output.success, data.get("content", ""), receipts)
 
     async def route_task(self, inputs):
         router = self.routing
@@ -293,6 +344,7 @@ class ComputerUseToolkit:
                 app=inputs.get("app"),
                 arguments=inputs.get("arguments"),
                 subtasks=subtasks,
+                choose=inputs.get("choose"),
             )
         except Exception as error:
             logger.exception("Routing failed")

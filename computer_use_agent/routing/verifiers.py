@@ -15,10 +15,28 @@ from .paths import Verdict, VerifySpec
 def _json_field(payload: Any, dotted: str) -> Any:
     current = payload
     for part in dotted.split("."):
-        if not isinstance(current, dict) or part not in current:
+        if isinstance(current, dict):
+            if part not in current:
+                return None
+            current = current[part]
+        elif isinstance(current, list) and part.isdigit() and int(part) < len(current):
+            current = current[int(part)]
+        else:
             return None
-        current = current[part]
     return current
+
+
+def _json_actual(spec: VerifySpec, evidence: dict[str, Any], output: str) -> Any:
+    """Resolve the field: the `receipts` prefix addresses execution evidence (structured action
+    receipts); every other path resolves against the JSON payload of the output text, so business
+    fields can never be shadowed by executor bookkeeping keys (status/returncode/output)."""
+    if spec.field and spec.field.split(".", 1)[0] == "receipts":
+        return _json_field(evidence, spec.field)
+    try:
+        payload = json.loads(output)
+    except ValueError:
+        return None
+    return _json_field(payload, spec.field)
 
 
 async def verify(spec: VerifySpec | None, evidence: dict[str, Any]) -> tuple[Verdict, str]:
@@ -66,11 +84,7 @@ async def verify(spec: VerifySpec | None, evidence: dict[str, Any]) -> tuple[Ver
         if spec.kind == "json_field":
             if not spec.field:
                 return Verdict.UNKNOWN, "json_field verifier needs a field path"
-            try:
-                payload = json.loads(output)
-            except ValueError:
-                return Verdict.FAIL, "output is not valid JSON"
-            actual = _json_field(payload, spec.field)
+            actual = _json_actual(spec, evidence, output)
             if actual is None:
                 return Verdict.FAIL, f"field {spec.field!r} missing"
             if str(spec.expect) in str(actual):  # equality is subsumed by the containment check

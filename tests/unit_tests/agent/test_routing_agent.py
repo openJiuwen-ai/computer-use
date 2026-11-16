@@ -47,6 +47,9 @@ def test_computer_use_calls_feed_gui_fallback_metrics(tmp_path):
         snapshot = toolkit.routing.store.snapshot(GUI_FALLBACK_ID, PathKind.GUI)
         assert snapshot.attempts == 1
         assert snapshot.successes == 1
+        # Quiet samples still record the neutral per-op prior, keeping the cost EMA unbiased.
+        prior = toolkit.routing.store.priors.cost_prior[PathKind.GUI]
+        assert snapshot.ema_cost == pytest.approx(prior)
     finally:
         asyncio.run(toolkit.close())
 
@@ -200,3 +203,72 @@ def test_agent_refusal_is_reported_to_model(model_server, tmp_path):
     contents = [json.dumps(data, ensure_ascii=False) for kind, data in events if kind == "tool_result"]
     assert any("decision: refuse" in content for content in contents)
     assert all("gone" not in content for content in contents)  # destructive path never ran
+
+
+def test_gui_disturbance_cost_charges_only_desktop_interference():
+    from computer_use_agent.toolkit import _gui_disturbance_cost
+
+    disturbed = (
+        {
+            "status": "verified",
+            "target": "field",
+            "detail": "typed",
+            "impact": {"attempts": [{"preparation_potential": {"mouse": "yes", "keyboard": "no"}}]},
+        },
+        {
+            "status": "verified",
+            "target": "field",
+            "detail": "typed",
+            "impact": {"attempts": [{"preparation_potential": None, "actual": {"foreground_changed": "yes"}}]},
+        },
+    )
+    assert _gui_disturbance_cost(disturbed) == pytest.approx(0.002)
+
+    clean = (
+        {
+            "status": "verified",
+            "target": "field",
+            "detail": "typed",
+            "impact": {
+                "attempts": [
+                    {
+                        "preparation_potential": {
+                            "mouse": "no",
+                            "keyboard": "no",
+                            "activation": "no",
+                            "clipboard": "no",
+                        },
+                        "actual": {"foreground_changed": "no"},
+                    }
+                ]
+            },
+        },
+    )
+    assert _gui_disturbance_cost(clean) is None
+    assert _gui_disturbance_cost(()) is None
+    assert _gui_disturbance_cost(("not-a-dict",)) is None
+
+
+def test_meta_receipts_extracts_structured_receipts():
+    from computer_use_agent.toolkit import _meta_receipts
+
+    raw = {"_meta": {"computer-use": {"receipts": [{"status": "verified"}, "junk"]}}}
+    assert _meta_receipts(raw) == ({"status": "verified"},)
+    assert _meta_receipts({}) == ()
+    assert _meta_receipts({"_meta": {"computer-use": {"failure": {"code": "x"}}}}) == ()
+
+
+def test_computer_use_result_meta_carries_receipts_key(tmp_path):
+    # End-to-end through the real MCP stack: the worker's receipts must survive the
+    # host-side _meta rebuild (session.py), otherwise routing evidence is always empty.
+    events = []
+    toolkit = ComputerUseToolkit(
+        AgentConfig(workspace=str(tmp_path)), on_event=lambda kind, data: events.append((kind, data))
+    )
+    try:
+        asyncio.run(_tool("computer_use", toolkit).invoke({"title": "meta", "code": "print('meta-ok')"}))
+        result = next(data["result"] for kind, data in events if kind == "tool_result")
+        meta = result.get("_meta", {}).get("computer-use", {})
+        assert isinstance(meta.get("receipts"), list)
+    finally:
+        asyncio.run(toolkit.close())

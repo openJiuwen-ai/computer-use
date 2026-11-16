@@ -479,6 +479,9 @@ class ExecutionSession:
             **result.get("_meta", {}),
             "computer-use": {
                 **self._journal.metadata(),
+                # Receipts produced by the worker (with impact diagnostics) survive the rebuild;
+                # the progress deque below only keeps trimmed summaries.
+                **({"receipts": worker_meta["receipts"]} if "receipts" in worker_meta else {}),
                 "executionId": pending["id"],
                 "durationMs": duration,
                 "progress": self._last_progress,
@@ -577,10 +580,13 @@ class ExecutionSession:
                         self._retiring = None
 
                 retired.add_done_callback(clear)
-            result = execution_error("\n".join(
-                part for part in (reason, dispatch, failure if failure is not None else RESET_NOTICE)
-                if part is not None
-            ))
+            result = execution_error(
+                "\n".join(
+                    part
+                    for part in (reason, dispatch, failure if failure is not None else RESET_NOTICE)
+                    if part is not None
+                )
+            )
             result["content"] = (self._pending["output"].content.copy() if self._pending is not None else []) + result[
                 "content"
             ]

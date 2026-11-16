@@ -16,11 +16,20 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, NamedTuple
 
 from .paths import ExecutionStatus, RouteExecution, TaskPath
 
-CodeRunner = Callable[[str], Awaitable[tuple[bool, str]]]
+
+class CodeOutcome(NamedTuple):
+    """Result of running one code template through the computer_use session."""
+
+    success: bool
+    output: str
+    receipts: tuple[dict, ...] = ()  # structured action receipts from the session, in dispatch order
+
+
+CodeRunner = Callable[[str], Awaitable[CodeOutcome]]
 
 
 class PathArgumentError(ValueError):
@@ -215,7 +224,7 @@ async def execute_sdk(path: TaskPath, arguments: dict[str, Any], run_code: CodeR
     # CancelledError is a BaseException and propagates untouched; only genuine
     # runner failures are converted, and those are effect-unknown by contract.
     try:
-        success, output = await run_code(code)
+        outcome = await run_code(code)
     except Exception as error:  # transport/session failure: effect unknown per project rules
         return RouteExecution(
             path_id=path.id,
@@ -225,13 +234,13 @@ async def execute_sdk(path: TaskPath, arguments: dict[str, Any], run_code: CodeR
             error=str(error),
             detail="session failure; previous actions may have executed",
         )
-    status = ExecutionStatus.COMPLETED if success else ExecutionStatus.FAILED
+    status = ExecutionStatus.COMPLETED if outcome.success else ExecutionStatus.FAILED
     return RouteExecution(
         path_id=path.id,
         status=status,
         dispatched=True,
         latency_s=time.monotonic() - started,
-        output=output[:4096],
-        error="" if success else "computer_use reported failure",
-        detail=json.dumps({"output": output[:4096]}),
+        output=outcome.output[:4096],
+        error="" if outcome.success else "computer_use reported failure",
+        detail=json.dumps({"output": outcome.output[:4096], "receipts": list(outcome.receipts)}),
     )

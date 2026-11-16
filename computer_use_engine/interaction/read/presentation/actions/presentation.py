@@ -20,6 +20,10 @@ class ActionPresentation:
     def has(self, receipt: Record) -> bool:
         return self._receipts.get(id(receipt)) is receipt
 
+    def receipts(self) -> list[Record]:
+        """All receipts seen in this tool result, in dispatch order."""
+        return list(self._receipts.values())
+
     def render(self, receipt: Record) -> tuple[int, str]:
         """Return the receipt ordinal and text, deduplicating repeated details."""
         number, previous = self._next, self._details.get(receipt["detail"])

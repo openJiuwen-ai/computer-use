@@ -87,10 +87,18 @@ class Router:
         app: str | None = None,
         arguments: dict | None = None,
         subtasks: list[str] | None = None,
+        choose: str | None = None,
     ) -> RoutePlan:
         if subtasks:
             return await self._plan_decomposition(task, app=app, subtasks=subtasks)
         candidates = await self._candidates(task, app=app, arguments=arguments)
+        return await self._decide(task, candidates, choose, arguments)
+
+    async def _decide(
+        self, task: str, candidates: list[RouteCandidate], choose: str | None, arguments: dict | None
+    ) -> RoutePlan:
+        if choose is not None:
+            return await self._resolve_choice(task, candidates, choose, arguments or {})
         eligible = [candidate for candidate in candidates if candidate.eligible]
         if not eligible:
             return RoutePlan(task=task, decision="refuse", candidates=tuple(candidates), reason="no eligible path")
@@ -190,13 +198,63 @@ class Router:
         app: str | None = None,
         arguments: dict | None = None,
         subtasks: list[str] | None = None,
+        choose: str | None = None,
     ) -> RouteResult:
         """Plan and, when the plan decides execution, run it in one call."""
 
-        plan = await self.plan(task, app=app, arguments=arguments, subtasks=subtasks)
+        plan = await self.plan(task, app=app, arguments=arguments, subtasks=subtasks, choose=choose)
         if plan.decision == "refuse":
             return RouteResult(plan=plan, success=False, summary=plan.reason)
         return await self.execute_plan(plan, arguments)
+
+    @staticmethod
+    def _chosen_plan(task: str, candidates: list[RouteCandidate], choose: str) -> RoutePlan:
+        """Model-directed choice: an explicit path id overrides score ranking, but never eligibility."""
+
+        match = next((candidate for candidate in candidates if candidate.path.id == choose), None)
+        if match is None:
+            return RoutePlan(task=task, decision="refuse", candidates=tuple(candidates), reason=f"no path {choose!r}")
+        if not match.eligible:
+            return RoutePlan(
+                task=task,
+                decision="refuse",
+                candidates=tuple(candidates),
+                reason=f"chosen path {choose!r} is not eligible: {', '.join(match.reasons)}",
+            )
+        return RoutePlan(
+            task=task,
+            decision="execute",
+            chosen=match,
+            candidates=tuple(candidates),
+            reason=f"model chose {choose!r} (score {match.score:.2f})",
+        )
+
+    async def _resolve_choice(
+        self, task: str, candidates: list[RouteCandidate], choose: str, arguments: dict
+    ) -> RoutePlan:
+        """Resolve a model-chosen id even when app/keyword filtering excluded it from candidates."""
+
+        match = next((candidate for candidate in candidates if candidate.path.id == choose), None)
+        if match is not None:
+            return self._chosen_plan(task, candidates, choose)
+        path = self.registry.get(choose)
+        if path is None:
+            return RoutePlan(
+                task=task,
+                decision="refuse",
+                candidates=tuple(candidates),
+                reason=f"no registered path {choose!r}",
+            )
+        eligible, reason = await self._eligible(path, arguments)
+        breakdown = score_path(path, self.store, self.config.weights).as_dict()
+        match = RouteCandidate(
+            path=path,
+            score=breakdown["score"],
+            eligible=eligible,
+            reasons=() if eligible else (reason,),
+            breakdown=breakdown,
+        )
+        return self._chosen_plan(task, [*candidates, match], choose)
 
     async def _plan_decomposition(self, task: str, *, app: str | None, subtasks: list[str]) -> RoutePlan:
         if not subtasks or len(subtasks) > self.config.policy.max_subtasks:
@@ -289,12 +347,12 @@ class Router:
         except PathArgumentError as error:
             return Verdict.UNKNOWN, f"gui_observe argument error: {error}"
         try:
-            success, output = await self._run_code(code)
+            outcome = await self._run_code(code)
         except Exception as error:  # pylint: disable=broad-exception-caught  # transport failure: no evidence either way
             return Verdict.UNKNOWN, f"gui_observe read unavailable: {error}"
-        if not success:
-            return Verdict.UNKNOWN, f"gui_observe read failed: {output[:200]}"
-        return _observation_verdict(spec, output)
+        if not outcome.success:
+            return Verdict.UNKNOWN, f"gui_observe read failed: {outcome.output[:200]}"
+        return _observation_verdict(spec, outcome.output)
 
     async def _fallback_unproven(self, fallback: RouteCandidate) -> bool:
         attempts = self.store.snapshot(fallback.path.id, fallback.path.kind).attempts

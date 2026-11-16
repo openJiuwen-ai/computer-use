@@ -20,7 +20,9 @@ the UI when an API or shell route may exist. If it chooses gui://fallback, no GU
 task has been executed; continue with computer_use. If it decides refuse,
 explain the reason to the user and ask how to proceed instead of forcing GUI
 operations. Pass subtasks to split a complex task into independently routed
-subtasks. A route reported with unknown effect must not be retried blindly.
+subtasks, or choose to execute a specific path id from the returned candidates
+(eligibility rules still apply). A route reported with unknown effect must not
+be retried blindly.
 """
 
 

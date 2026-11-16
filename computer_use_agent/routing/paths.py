@@ -93,6 +93,12 @@ class VerifySpec:
     allowed) and expect is the substring the observation output must contain
     (empty: a completed read alone counts as PASS). Failed or undispatched
     executions are never re-read; unavailable reads degrade to UNKNOWN.
+
+    json_field resolves the field path against the output's JSON payload;
+    a path under the reserved "receipts" prefix instead addresses the
+    structured action receipts in the execution evidence (list indices
+    allowed, e.g. "receipts.0.status"), so executor bookkeeping keys can
+    never shadow same-named business fields.
     """
 
     kind: Literal["http_status", "exit_code", "output_contains", "output_regex", "json_field", "gui_observe"]

@@ -30,6 +30,7 @@ from computer_use_agent.routing import (
     score_path,
 )
 from computer_use_agent.routing.executors import (
+    CodeOutcome,
     PathArgumentError,
     execute_api,
     execute_cli,
@@ -549,8 +550,8 @@ def test_router_gui_observe_verifier_passes_when_reread_confirms_effect():
     async def run_code(code):
         if code.startswith("print"):
             assert code == "print(app.read().text)"
-            return True, "window: Notes\ntitle: New Note"
-        return True, "dispatched"
+            return CodeOutcome(True, "window: Notes\ntitle: New Note")
+        return CodeOutcome(True, "dispatched")
 
     router = _gui_observe_router(run_code)
     result = asyncio.run(router.route("create a note"))
@@ -567,8 +568,8 @@ def test_router_gui_observe_verifier_fails_when_reread_contradicts_effect():
     async def run_code(code):
         codes.append(code)
         if code.startswith("print"):
-            return True, "window: Notes\ntitle: Old Note"
-        return True, "dispatched"
+            return CodeOutcome(True, "window: Notes\ntitle: Old Note")
+        return CodeOutcome(True, "dispatched")
 
     router = _gui_observe_router(run_code)
     result = asyncio.run(router.route("create a note"))
@@ -582,7 +583,7 @@ def test_router_gui_observe_verifier_unknown_keeps_posterior_clean():
     async def run_code(code):
         if code.startswith("print"):
             raise RuntimeError("session down")
-        return True, "dispatched"
+        return CodeOutcome(True, "dispatched")
 
     router = _gui_observe_router(run_code)
     prior = router.store.posterior_success("sdk.note", PathKind.GUI)
@@ -601,7 +602,7 @@ def test_router_gui_observe_skips_reread_when_execution_failed():
 
     async def run_code(code):
         codes.append(code)
-        return False, "boom"
+        return CodeOutcome(False, "boom")
 
     router = _gui_observe_router(run_code)
     result = asyncio.run(router.route("create a note"))
@@ -610,3 +611,121 @@ def test_router_gui_observe_skips_reread_when_execution_failed():
     assert execution.status is ExecutionStatus.FAILED
     assert execution.verdict is Verdict.UNKNOWN
     assert codes == ["app = computer.app('Notes')"]  # no observation call after a failed execution
+
+
+def test_json_field_verifier_supports_receipt_list_indexing():
+    evidence = {"receipts": [{"status": "verified"}, {"status": "dispatched"}]}
+
+    async def run():
+        verdict, _ = await verify(VerifySpec(kind="json_field", field="receipts.0.status", expect="verified"), evidence)
+        assert verdict is Verdict.PASS
+        verdict, _ = await verify(VerifySpec(kind="json_field", field="receipts.1.status", expect="verified"), evidence)
+        assert verdict is Verdict.FAIL
+        verdict, note = await verify(
+            VerifySpec(kind="json_field", field="receipts.9.status", expect="verified"), evidence
+        )
+        assert verdict is Verdict.FAIL
+        assert "missing" in note
+
+    asyncio.run(run())
+
+
+def test_json_field_verifier_reads_business_fields_from_output_json():
+    # Executor bookkeeping keys must not shadow same-named business fields in the payload.
+    evidence = {"status": 200, "output": json.dumps({"status": "ok"})}
+
+    async def run():
+        verdict, _ = await verify(VerifySpec(kind="json_field", field="status", expect="ok"), evidence)
+        assert verdict is Verdict.PASS
+        verdict, _ = await verify(VerifySpec(kind="json_field", field="status", expect="200"), evidence)
+        assert verdict is Verdict.FAIL
+
+    asyncio.run(run())
+
+
+def test_router_sdk_evidence_carries_receipts_for_structured_verification():
+    registry = PathRegistry()
+    registry.register(
+        TaskPath(
+            id="sdk.field",
+            kind=PathKind.GUI,
+            app="form",
+            intent="fill the name field",
+            sdk=SdkSpec(code_template="field.type_text('Ada')"),
+            verify=VerifySpec(kind="json_field", field="receipts.0.status", expect="verified"),
+        )
+    )
+    receipts = ({"status": "verified", "target": "Name field", "detail": "typed 3 characters", "impact": None},)
+
+    async def run_code(code):
+        return CodeOutcome(True, "dispatched", receipts)
+
+    router = Router(registry, RouterConfig(policy=RoutingPolicy(min_confidence=0.4)), run_code=run_code)
+    result = asyncio.run(router.route("fill the name field"))
+    assert result.success is True
+    assert result.executions[0].verdict is Verdict.PASS
+    snapshot = router.store.snapshot("sdk.field", PathKind.GUI)
+    assert snapshot.attempts == 1
+    assert snapshot.successes == 1
+
+
+def _choose_router():
+    registry = PathRegistry()
+    registry.register(echo_path("test.echo"))
+    registry.register(
+        make_cli(
+            "test.quiet",
+            (sys.executable, "-c", "print('quiet-route')"),
+            intent="say hello quietly",
+            verify_spec=VerifySpec(kind="output_contains", expect="quiet-route"),
+            time_hint=50.0,
+        )
+    )
+    return registry
+
+
+def test_router_model_choice_overrides_score_ranking():
+    router = Router(_choose_router(), RouterConfig(policy=RoutingPolicy(min_confidence=0.4)))
+    plan = asyncio.run(router.plan("say hello", choose="test.quiet"))
+    assert plan.decision == "execute"
+    assert plan.chosen.path.id == "test.quiet"
+    assert "model chose" in plan.reason
+    result = asyncio.run(router.execute_plan(plan, {}))
+    assert result.success is True
+    assert "quiet-route" in result.executions[0].output
+
+
+def test_router_model_choice_must_stay_eligible():
+    registry = PathRegistry()
+    registry.register(make_cli("rm.stuff", ("echo", "removed"), risk=RiskClass.DESTRUCTIVE, intent="remove things"))
+    router = Router(registry, RouterConfig(policy=RoutingPolicy(min_confidence=0.4)))
+
+    plan = asyncio.run(router.plan("remove things", choose="rm.stuff"))
+    assert plan.decision == "refuse"
+    assert "not eligible" in plan.reason
+
+    plan = asyncio.run(router.plan("remove things", choose="missing.path"))
+    assert plan.decision == "refuse"
+    assert "no registered path" in plan.reason
+
+
+def test_router_model_choice_resolves_registered_path_filtered_from_candidates():
+    # The id is registered, but the task's keywords and app hint exclude it from candidates;
+    # choose must still resolve it through the registry rather than refuse with "no path".
+    registry = PathRegistry()
+    registry.register(
+        make_cli(
+            "test.echo",
+            (sys.executable, "-c", "print('hello-route')"),
+            app="test",
+            intent="say hello",
+            verify_spec=VerifySpec(kind="output_contains", expect="hello-route"),
+        )
+    )
+    router = Router(registry, RouterConfig(policy=RoutingPolicy(min_confidence=0.4)))
+
+    plan = asyncio.run(router.plan("completely unrelated wording", app="other", choose="test.echo"))
+    assert plan.decision == "execute"
+    assert plan.chosen.path.id == "test.echo"
+    result = asyncio.run(router.execute_plan(plan, {}))
+    assert result.success is True

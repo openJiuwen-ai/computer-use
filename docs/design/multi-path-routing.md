@@ -64,15 +64,16 @@ t̂ = 预计时延 / time_scale，ĉ = 预计成本 / cost_scale
 4. **Decide**：
    - 最优分 ≥ `min_confidence` → **EXECUTE** 该路径；
    - 否则有兜底 → **EXECUTE gui://fallback**（模型继续 computer_use）；兜底自身后验也低于地板且尝试数足够 → **REFUSE**（给出理由与证据，模型向用户说明而非硬操作）；
-   - 调用方传入 `subtasks` → **DECOMPOSE**：每个子任务独立走完整管线，顺序执行，首个失败即停止并保留已完成子结果。
-5. **Execute**：按 kind 分派执行器（`routing/executors.py`）——API 走 stdlib urllib（线程内同步调用）、CLI 走 asyncio 子进程（argv 直传，无 shell）、SDK/GUI 走 `computer_use` 工具。超时/取消按项目原则**不重放**，结果记为 effect 未知。
-6. **Verify**：按契约校验（http_status / exit_code / output_contains / output_regex / json_field / gui_observe；llm_judge 为扩展口）。`gui_observe` 仅对执行完成的路径经同一会话对目标做只读复读（`VerifySpec.field` 为观察代码模板，`expect` 为输出需包含的子串，留空则复读成功即 PASS）；执行失败/未派发不复读，复读不可用（执行器异常/会话失败）记 UNKNOWN。UNKNOWN 既保留不确定性，也不计为失败——执行完成但 verdict 为 UNKNOWN 时效果按未知处理，不写入后验。指标加载对损坏/不兼容行逐行跳过，历史文件不阻断启动。
-7. **Record**：`OutcomeRecord` 写回指标库；工具层对非路由发起的 `computer_use` 调用按 operation 粒度自动采样到兜底路径。
+   - 调用方传入 `subtasks` → **DECOMPOSE**：每个子任务独立走完整管线，顺序执行，首个失败即停止并保留已完成子结果；
+   - 模型传入 `choose`（某次返回的候选 path id）→ 覆盖打分排序直接执行该候选，但 **eligibility 永远生效**：id 不存在或候选不可选时 REFUSE 并说明原因。
+5. **Execute**：按 kind 分派执行器（`routing/executors.py`）——API 走 stdlib urllib（线程内同步调用）、CLI 走 asyncio 子进程（argv 直传，无 shell）、SDK/GUI 走 `computer_use` 工具。超时/取消按项目原则**不重放**，结果记为 effect 未知。SDK/GUI 执行后，`computer_use` 工具结果 `_meta.computer-use.receipts` 携带结构化回执（status/target/intent/detail + impact 诊断），随执行证据一并供校验与成本核算。
+6. **Verify**：按契约校验（http_status / exit_code / output_contains / output_regex / json_field / gui_observe；llm_judge 为扩展口）。`json_field` 先查执行证据本身（含回执列表，支持下标路径如 `receipts.0.status`），未命中再解析输出文本中的 JSON。`gui_observe` 仅对执行完成的路径经同一会话对目标做只读复读（`VerifySpec.field` 为观察代码模板，`expect` 为输出需包含的子串，留空则复读成功即 PASS）；执行失败/未派发不复读，复读不可用（执行器异常/会话失败）记 UNKNOWN。UNKNOWN 既保留不确定性，也不计为失败——执行完成但 verdict 为 UNKNOWN 时效果按未知处理，不写入后验。指标加载对损坏/不兼容行逐行跳过，历史文件不阻断启动。
+7. **Record**：`OutcomeRecord` 写回指标库；工具层对非路由发起的 `computer_use` 调用按 operation 粒度自动采样到兜底路径。GUI 采样按回执 impact 计干扰成本：触发全局输入准备（mouse/keyboard/activation/clipboard 任一 yes）或前台变化的回执每个 +0.001，无干扰样本回退到既有成本先验。
 
 ## 集成
 
 - `AgentConfig.routing: RoutingConfig`（开关、权重、先验、paths/metrics 文件、风险策略）。
-- 新增一个模型工具 `route_task(task, app?, arguments?, subtasks?)`（`ComputerUseToolkit`）：返回排序后的候选与指标明细、决策与理由；决策为 EXECUTE 时直接执行并回传结果与校验结论。刻意保持单工具最小接口。
+- 新增一个模型工具 `route_task(task, app?, arguments?, subtasks?, choose?)`（`ComputerUseToolkit`）：返回排序后的候选与指标明细、决策与理由；决策为 EXECUTE 时直接执行并回传结果与校验结论。`choose` 把最终选择权显式交还模型，绕开关键词匹配的弱项。刻意保持单工具最小接口。
 - `computer_use` 调用计时并自动累计到兜底指标（路由发起的调用去重）。
 - 系统提示增补：何时调用 route_task、gui_fallback / refuse / decompose 各自如何继续。
 

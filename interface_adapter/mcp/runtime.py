@@ -60,6 +60,8 @@ from computer_use.session.operations import OperationDeadlineExceeded, current_o
 from .image_delivery import prepare_image, project_document
 from .image_presentation import PresentationImages
 from .output import ObservationOutput, ObservationPresenter, OutputBuffer
+from .receipts import receipt_evidence
+from .receipts import receipt_summary as _receipt_summary
 from .worker_lifecycle import READY_ENV
 from .worker_transport import WorkerMessageWriter, consume_protocol, read_message
 
@@ -69,15 +71,6 @@ _runs = ContextVar("computer_use_execution", default=None)
 def _window_closed_without_input(error: ComputerUseError) -> bool:
     """Require confirmed closure and complete evidence about the requested input."""
     return error.window_lifecycle == "closed" and confirmed_no_requested_input(error.impact)
-
-
-def _receipt_summary(receipt):
-    return {
-        "status": receipt["status"],
-        "target": receipt["target"][:256],
-        "intent": receipt.get("intent"),
-        "detail": receipt["detail"][:400],
-    }
 
 
 class Runtime:
@@ -177,12 +170,15 @@ class Runtime:
         for observation in run["observations"].take():
             incoming = {self.presenter.tree_key(observation, tree) for tree in self.presenter.trees(observation)}
             for previous in run["observationEntries"]:
-                if not previous["pinned"] and not previous["superseded"] and run["observations"].superseded(
-                    previous["observation"], observation, incoming
+                if (
+                    not previous["pinned"]
+                    and not previous["superseded"]
+                    and run["observations"].superseded(previous["observation"], observation, incoming)
                 ):
                     previous["superseded"] = True
             entry = {
-                "kind": "observation", "observation": observation,
+                "kind": "observation",
+                "observation": observation,
                 "pinned": explicit or bool(observation.get("explicitRead") or observation.get("full")),
                 "superseded": False,
             }
@@ -370,7 +366,8 @@ class Runtime:
             png = observation_screenshot(original)
             cached = run["preparedImages"].get(id(png)) if png is not None else None
             ready = (
-                png if cached is not None and cached[1].source is png and cached[0] == hashlib.sha256(png).digest()
+                png
+                if cached is not None and cached[1].source is png and cached[0] == hashlib.sha256(png).digest()
                 else None
             )
             document = observation.get("document") or observation_document(original)
@@ -460,8 +457,11 @@ class Runtime:
                 budget.checkpoint()
             delivery = prepare_image(png)
             cached = (
-                fingerprint, delivery, base64.b64encode(delivery.png).decode("ascii"),
-                image_metadata(png), image_output_scope(png),
+                fingerprint,
+                delivery,
+                base64.b64encode(delivery.png).decode("ascii"),
+                image_metadata(png),
+                image_output_scope(png),
             )
             run["preparedImages"][id(png)] = cached
             # Slots retain their original encoding even if the caller mutates
@@ -539,8 +539,10 @@ class Runtime:
             ordinary.clear()
 
         for value in values:
-            captured = value if isinstance(value, LazyObservation) else (
-                value.observation if isinstance(value, CapturedObservationText) else None
+            captured = (
+                value
+                if isinstance(value, LazyObservation)
+                else (value.observation if isinstance(value, CapturedObservationText) else None)
             )
             if captured is None:
                 ordinary.append(value)
@@ -553,19 +555,19 @@ class Runtime:
             if run["observations"].contains(captured):
                 self.flush_observations(run, explicit=True)
             elif any(
-                entry["kind"] == "observation" and not entry["superseded"]
+                entry["kind"] == "observation"
+                and not entry["superseded"]
                 and entry["observation"].get("sourceState", entry["observation"]["state"]) is captured
                 for entry in run["outputEntries"]
             ):
                 for entry in run["outputEntries"]:
-                    if entry["kind"] == "observation" and entry["observation"].get(
-                        "sourceState", entry["observation"]["state"]
-                    ) is captured:
+                    if (
+                        entry["kind"] == "observation"
+                        and entry["observation"].get("sourceState", entry["observation"]["state"]) is captured
+                    ):
                         entry["pinned"] = True
             elif not any(state is captured for state in run["deliveredObservations"]):
-                self.emit(dict(type="text", text=(
-                    "Retained observation: previously delivered or superseded."
-                )), True)
+                self.emit(dict(type="text", text="Retained observation: previously delivered or superseded."), True)
         if not values:
             self.emit(dict(type="text", text="" if end in (None, "\n") else end), True)
         emit_ordinary()
@@ -631,7 +633,11 @@ class Runtime:
             text_block.update(passive_text)
             raise
         run["imageOutputs"][output_key] = {
-            "caption": caption, "label": label, "text": text_block, "metadata": metadata, "deliveries": [delivery],
+            "caption": caption,
+            "label": label,
+            "text": text_block,
+            "metadata": metadata,
+            "deliveries": [delivery],
         }
         self.record_image(run, delivery, coalesced=False)
 
@@ -640,10 +646,12 @@ class Runtime:
             return False
         run["images"].append(delivery)
         captured = run["preparedDeliveries"][id(delivery)][3]
-        self.send({
-            "diagnostic": {"kind": "image_output", "capture": captured, "coalesced": coalesced},
-            "executionId": run["id"],
-        })
+        self.send(
+            {
+                "diagnostic": {"kind": "image_output", "capture": captured, "coalesced": coalesced},
+                "executionId": run["id"],
+            }
+        )
         return True
 
     @staticmethod
@@ -689,8 +697,7 @@ class Runtime:
         if pending_image is None:
             return ""
         return (
-            f"\nUse the attached image (Image {pending_image}, Window {pending_window}) "
-            "in the next computer_use call."
+            f"\nUse the attached image (Image {pending_image}, Window {pending_window}) in the next computer_use call."
         )
 
     async def finish(self, error: BaseException | None = None):
@@ -728,7 +735,10 @@ class Runtime:
         point_hint = self.reconcile_image_hints(run, acknowledged, pending_point)
         run["active"] = False
         run["phase"] = "finished"
-        result = dict(content=run["output"].content.copy())
+        result = dict(
+            content=run["output"].content.copy(),
+            _meta={"computer-use": {"receipts": [receipt_evidence(item) for item in run["actions"].receipts()]}},
+        )
         message = None
         if error is not None:
             message = type(error).__name__ + ": " + str(error)
@@ -736,7 +746,7 @@ class Runtime:
                 failure = {"code": error.code, "target": error.target[:256], "effect": error.effect}
                 if error.action_receipt is not None:
                     failure["receipt"] = _receipt_summary(error.action_receipt)
-                result["_meta"] = {"computer-use": {"failure": failure}}
+                result["_meta"]["computer-use"]["failure"] = failure
             if isinstance(error, ComputerUseError) and _window_closed_without_input(error):
                 detail, newline, facts = message.partition("\n")
                 outcome = "\nRequested input: not dispatched."
@@ -746,7 +756,8 @@ class Runtime:
                 message = detail + outcome + newline + facts
             menu_hint = ""
             if (
-                isinstance(error, ComputerUseError) and error.observed_menu_window is not None
+                isinstance(error, ComputerUseError)
+                and error.observed_menu_window is not None
                 and any(state is error.observation for state in run["deliveredObservations"])
             ):
                 menu_hint = (
@@ -754,7 +765,7 @@ class Runtime:
                     f"Use its menu elements in Window {error.observed_menu_window}. Exact opener unconfirmed."
                 )
             hints = menu_hint + point_hint
-            message = message[:4096 - len(hints)] + hints
+            message = message[: 4096 - len(hints)] + hints
             if not run.get("evaluationStarted"):
                 message += "\nCode execution: not started."
             result["content"].append(dict(type="text", text=message))
