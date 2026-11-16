@@ -271,6 +271,7 @@ def test_unavailable_source_wheel_explains_startup_failure(installed, monkeypatc
 def test_installed_backend_check_requires_driver_resources(installed, monkeypatch, system, files):
     resources, home = installed
     monkeypatch.setattr(sys, "platform", system)
+    monkeypatch.setattr(paths, "_linux_desktop_unavailable_reason", lambda: None)
     (resources / "backend.json").write_text("{}", encoding="utf-8")
     assert paths.installed_backend_unavailable_reason() == "backend_missing"
     for name in files:
@@ -278,6 +279,22 @@ def test_installed_backend_check_requires_driver_resources(installed, monkeypatc
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     assert paths.installed_backend_unavailable_reason() is None
+    assert not home.exists()
+
+
+def test_linux_installed_driver_reports_missing_desktop_without_preparing_runtime(installed, monkeypatch):
+    resources, home = installed
+    monkeypatch.setattr(sys, "platform", "linux")
+    for name in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_SESSION_TYPE", "DBUS_SESSION_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS"):
+        monkeypatch.delenv(name, raising=False)
+    (resources / "backend.json").write_text("{}", encoding="utf-8")
+    driver = resources / paths.LINUX_RUNTIME / "__main__.py"
+    driver.parent.mkdir(parents=True)
+    driver.touch()
+
+    assert paths.installed_backend_unavailable_reason() == "backend_missing"
+    assert driver.is_file()
+    assert not (resources / "backend-status.json").exists()
     assert not home.exists()
 
 

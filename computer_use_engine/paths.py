@@ -59,10 +59,34 @@ def installed_read_engine_unavailable_reason() -> str | None:
     return reason if reason in ("native_build_failed", "unsupported_platform") else "native_build_failed"
 
 
-def installed_backend_unavailable_reason() -> str | None:
-    """Check wheel resources without preparing a runtime or launching a driver."""
-    if checkout_root() is not None:
+def _linux_desktop_unavailable_reason() -> str | None:
+    if sys.platform != "linux":
         return None
+    if not (
+        any(os.environ.get(name) for name in ("DISPLAY", "WAYLAND_DISPLAY", "AT_SPI_BUS_ADDRESS",
+                                              "DBUS_SESSION_BUS_ADDRESS"))
+        or os.environ.get("XDG_SESSION_TYPE") == "wayland"
+    ):
+        return "backend_missing"
+    probe = Path(__file__).with_name("native") / "linux_desktop.py"
+    try:
+        result = subprocess.run(
+            [linux_python(), "-I", str(probe)],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "backend_missing"
+    return None if result.returncode == 0 else "backend_missing"
+
+
+def installed_backend_unavailable_reason() -> str | None:
+    """Check wheel resources and the Linux session without launching a driver."""
+    if checkout_root() is not None:
+        return _linux_desktop_unavailable_reason()
     assets = Path(__file__).parent / "_resources"
     status_file = assets / "backend-status.json"
     try:
@@ -81,7 +105,9 @@ def installed_backend_unavailable_reason() -> str | None:
             )
         else:
             return "unsupported_platform"
-        return installed_read_engine_unavailable_reason() if available else "backend_missing"
+        if not available:
+            return "backend_missing"
+        return installed_read_engine_unavailable_reason() or _linux_desktop_unavailable_reason()
     except (AttributeError, OSError, ValueError):
         return "backend_missing"
 
