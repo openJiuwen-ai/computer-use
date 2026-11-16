@@ -167,13 +167,14 @@ def decode_directory(value):
             if not native_metadata or item["selector"] in foreground and item["appIsForeground"] is not True:
                 raise ValueError("protocol: window catalogue requires native metadata for the exact instance")
     elif result["kind"] == "applications":
-        if "launchSelector" in result and (
-            result["platform"] != "windows"
-            or any(key in result for key in ("path", "installation", "scope", "windowTitle"))
-            or any(item["isRunning"] or not (item["identifier"] or item["path"]) for item in result["applications"])
-        ):
-            raise ValueError("protocol: invalid Windows launch candidate scope")
-        if result["platform"] == "windows" and "installation" in result:
+        if "launchSelector" in result:
+            mixed_scope = any(key in result for key in ("path", "installation", "scope", "windowTitle"))
+            invalid_candidate = any(
+                item["isRunning"] or not (item["identifier"] or item["path"]) for item in result["applications"]
+            )
+            if result["platform"] != "windows" or mixed_scope or invalid_candidate:
+                raise ValueError("protocol: invalid Windows launch candidate scope")
+        elif result["platform"] == "windows" and "installation" in result:
             if any(key in result for key in ("path", "scope", "windowTitle")) or any(
                 not item["isRunning"] for item in result["applications"]
             ):
