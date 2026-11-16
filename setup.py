@@ -210,6 +210,21 @@ class BuildWithResources(build_py):
         if BACKEND_DIR:
             shutil.copytree(BACKEND_DIR, output, dirs_exist_ok=True)
             return
+        # Loose driver sources can exceed MAX_PATH in setuptools' wheel staging tree.
+        windows_wheel = BACKEND_TARGET == "windows-x86_64" or self.native_platform == "win_amd64"
+        manifest = {} if windows_wheel else self.copy_source_resources(output)
+        if BACKEND_ARCHIVE:
+            backend = BACKENDS["unpack_archive"](BACKEND_ARCHIVE, output, root=ROOT)
+            for name in ["backend.json", *backend["files"]]:
+                manifest[name] = hashlib.sha256((output / name).read_bytes()).hexdigest()
+        else:
+            manifest.update(install_source_backend(resolved, output, self.native_platform))
+        (output / "manifest.json").write_text(
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+        )
+
+    @staticmethod
+    def copy_source_resources(output):
         resources = [ROOT / name for name in FILES]
         for directory in DIRECTORIES:
             base = ROOT / directory
@@ -234,15 +249,7 @@ class BuildWithResources(build_py):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(resource, target)
             manifest[relative.as_posix()] = hashlib.sha256(resource.read_bytes()).hexdigest()
-        if BACKEND_ARCHIVE:
-            backend = BACKENDS["unpack_archive"](BACKEND_ARCHIVE, output, root=ROOT)
-            for name in ["backend.json", *backend["files"]]:
-                manifest[name] = hashlib.sha256((output / name).read_bytes()).hexdigest()
-        else:
-            manifest.update(install_source_backend(resolved, output, self.native_platform))
-        (output / "manifest.json").write_text(
-            json.dumps(manifest, sort_keys=True, separators=(",", ":")), encoding="utf-8"
-        )
+        return manifest
 
 
 class BuildReadEngine(build_ext):

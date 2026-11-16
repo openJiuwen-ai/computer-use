@@ -172,8 +172,12 @@ def build_read_engine(root, output):
     if output.name != build.filename:
         raise RuntimeError(f"This interpreter builds {build.filename}. Build the artifact with its target Python ABI.")
     crate = Path(root) / "computer_use_engine/interaction/read/accessibility"
-    # Cargo's library basename omits the Python ABI.
-    target_dir = crate.resolve() / "target" / build.soabi
+    # Cargo's library basename omits the Python ABI. Keep Windows linker
+    # outputs close to the checkout root to leave room for Cargo's nesting.
+    target_root = crate.resolve() / "target"
+    if build.backend_target == "windows-x86_64":
+        target_root = Path(root).resolve() / ".build/rust"
+    target_dir = target_root / build.soabi
     with (crate / "rust-toolchain.toml").open("rb") as specification:
         toolchain = tomllib.load(specification)["toolchain"]["channel"]
     environment = {

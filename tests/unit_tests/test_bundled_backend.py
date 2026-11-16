@@ -246,6 +246,45 @@ def test_source_build_includes_backend_or_status_in_manifest(tmp_path, monkeypat
         assert json.loads((resources / files[0]).read_bytes()) == {"reason": "unsupported_platform"}
 
 
+@pytest.mark.parametrize("driver_available", [True, False])
+def test_windows_source_wheel_only_bundles_runtime_files(tmp_path, monkeypatch, source_builder, driver_available):
+    driver_files = (
+        WINDOWS_DRIVER,
+        "os_adapter/windows/.build/computer-use-capture.exe",
+        "os_adapter/windows/.build/Interop.NativeUIA.dll",
+    )
+    payload = {
+        "format": 1,
+        "target": "windows-x86_64",
+        "protocol": native.NATIVE_PROTOCOL_VERSION,
+        "files": {name: {"sha256": hashlib.sha256(b"driver").hexdigest(), "mode": 0o755} for name in driver_files},
+    }
+
+    def build(command, **_):
+        if not driver_available:
+            raise subprocess.CalledProcessError(1, command)
+        stage = Path(command[-2])
+        for name in driver_files:
+            path = stage / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"driver")
+        (stage / "backend.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.setattr(subprocess, "run", build)
+    command = source_builder["BuildWithResources"](setuptools.Distribution({"packages": []}))
+    command.build_lib = str(tmp_path / "build")
+    command.native_platform = "win_amd64"
+    command.ensure_finalized()
+    command.run()
+
+    resources = Path(command.build_lib) / "computer_use/_resources"
+    expected = {"backend.json", *driver_files} if driver_available else {"backend-status.json"}
+    assert {path.relative_to(resources).as_posix() for path in resources.rglob("*") if path.is_file()} == (
+        expected | {"manifest.json"}
+    )
+    assert set(json.loads((resources / "manifest.json").read_bytes())) == expected
+
+
 @pytest.mark.parametrize(("reason", "detail", "code"), [
     ("native_build_failed", "could not be built during installation", "execution_failed"),
     ("unsupported_platform", "is unavailable on this operating system or architecture", "unsupported_operation"),

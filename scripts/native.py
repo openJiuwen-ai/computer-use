@@ -290,6 +290,9 @@ def build_windows(root=None):
     compiler = framework / "csc.exe"
     if not compiler.is_file():
         raise RuntimeError("Windows x64 with .NET Framework 4.8 and its C# compiler is required.")
+    sources = sorted((native / "Sources").rglob("*.cs"))
+    if not sources:
+        raise RuntimeError("Windows backend sources are missing. Build and reinstall the wheel from a source checkout.")
     generate_pointer_assets(root=native.parents[1])
     output = native / ".build/computer-use-driver.exe"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -312,9 +315,6 @@ def build_windows(root=None):
         "WPF/UIAutomationClient.dll",
         "WPF/UIAutomationTypes.dll",
     )
-    sources = sorted((native / "Sources").rglob("*.cs"))
-    if not sources:
-        raise RuntimeError("Windows backend sources are missing; reinstall the toolkit.")
     arguments = [
         "/nologo",
         "/target:exe",
