@@ -6,6 +6,7 @@
 import asyncio
 import hashlib
 from collections import OrderedDict
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
@@ -15,10 +16,10 @@ from weakref import WeakSet
 from computer_use.client.factory import session_controller
 from computer_use.diagnostics import local_failure
 from computer_use.errors import ComputerUseError
-from computer_use.interaction.agent.requests import ActOnElement, ResolveElement, UIKeyboard, UIPointer
+from computer_use.interaction.agent.requests import ActOnElement, ObserveUI, ResolveElement, UIKeyboard, UIPointer
 from computer_use.interaction.query.pipeline import FindElementPipeline
 from computer_use.interaction.requests import ExecuteAction
-from computer_use.native.contracts import Binding, Intent, Knowledge
+from computer_use.native.contracts import ApplicationBinding, Binding, Intent, Knowledge
 from computer_use.native.lifecycle import CallLifecycle
 from computer_use.pipeline import Control, Pipeline, Repeat, Scope, Select, Sequence
 from computer_use.session.events import set_action_handler, set_observation_handler
@@ -316,3 +317,57 @@ class InteractionBehaviorTests(IsolatedAsyncioTestCase):
         visit(pipeline, ())
         self.assertIn(id(adapter.interfaces.write), visited)
         self.assertIn(id(adapter.interfaces.lookup), visited)
+
+    async def test_foreground_read_reopens_windowless_application_in_original_call(self):
+        path = "computer_use.interaction.read.views.pipeline"
+        directory = {
+            "session": "test",
+            "application": "instance:app",
+            "platform": "macos",
+            "surfaces": (),
+            "stopReasons": (),
+        }
+        reopened = dict(directory, surfaces=({"window": "new"},))
+        preparation = {"reopenStatus": "requested"}
+        self.controller.transport.capabilities = ("nativeApplicationReopen",)
+        port = self.controller.port
+        port.prepare_observation = AsyncMock(return_value=preparation)
+
+        @asynccontextmanager
+        async def read_scope(target, timeout_ms):
+            self.assertIsNone(target)
+            yield SimpleNamespace(token="lease", remaining=lambda: timeout_ms)
+
+        resolve = AsyncMock(side_effect=[(directory, None), (reopened, None)])
+        with (
+            patch(f"{path}.resolve", new=resolve),
+            patch("computer_use.interaction.read.views.observation_preparation.resolve", new=resolve),
+            patch(f"{path}.InterfaceReadPipeline._collect", new=AsyncMock()) as collect,
+            patch.object(port.calls, "open", read_scope),
+        ):
+            await self.controller.run(ObserveUI(self.ui, "both", False, None, allow_foreground=True))
+
+        port.prepare_observation.assert_awaited_once_with("lease", ApplicationBinding("test", "instance:app"), 3000)
+        self.assertEqual(resolve.await_count, 2)
+        self.assertIs(collect.call_args.args[4], reopened)
+        self.assertIs(collect.call_args.args[6], preparation)
+
+    async def test_plain_menu_or_incomplete_read_does_not_reopen_application(self):
+        path = "computer_use.interaction.read.views.pipeline"
+        directory = {
+            "session": "test",
+            "application": "instance:app",
+            "platform": "macos",
+            "surfaces": (),
+            "stopReasons": (),
+        }
+        self.controller.transport.capabilities = ("nativeApplicationReopen",)
+        self.controller.port.prepare_observation = AsyncMock()
+        for allow, menu, stop_reasons in ((False, None, ()), (True, ("Window",), ()), (True, None, ("partial",))):
+            with (
+                patch(f"{path}.resolve", new=AsyncMock(return_value=(dict(directory, stopReasons=stop_reasons), None))),
+                patch(f"{path}.InterfaceReadPipeline._collect", new=AsyncMock()),
+            ):
+                await self.controller.run(ObserveUI(self.ui, "tree", False, menu, allow_foreground=allow))
+
+        self.controller.port.prepare_observation.assert_not_awaited()
