@@ -22,7 +22,13 @@ namespace ComputerUse.Windows
             return target.ContainsKey("global");
         }
 
-        internal static Dictionary<string, object> Resolve(object raw, string session, bool allowGlobal = false)
+        internal static bool IsInstallation(Dictionary<string, object> target)
+        {
+            return target.ContainsKey("application");
+        }
+
+        internal static Dictionary<string, object> Resolve(object raw, string session, bool allowGlobal = false,
+                                                           bool allowInstallation = false)
         {
             var value = Wire.Object(raw);
             if (allowGlobal && IsGlobal(value))
@@ -32,6 +38,14 @@ namespace ComputerUse.Windows
                     throw new Failure("invalid_request", "global input requires the global session scope");
                 if (Wire.Str(value, "session") != session)
                     throw new Failure("stale_target", "global input belongs to another native session");
+                return new Dictionary<string, object>(value);
+            }
+            if (allowInstallation && IsInstallation(value))
+            {
+                Wire.Keys(value, "session,application");
+                Wire.Str(value, "application");
+                if (Wire.Str(value, "session") != session)
+                    throw new Failure("stale_target", "the application launch entry belongs to another native session");
                 return new Dictionary<string, object>(value);
             }
             Wire.Keys(value, String.Join(",", Keys));

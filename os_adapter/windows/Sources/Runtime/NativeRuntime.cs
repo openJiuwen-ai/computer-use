@@ -40,6 +40,7 @@ namespace ComputerUse.Windows
                     .Concat(reader is INativeReadEventBackend ? new[] { "nativeReadEvents" } : new string[0])
                     .Concat(reader is INativeReadPreparation ? new[] { "nativeObservationPreparation" } : new string[0])
                     .Concat(capture == null ? new string[0] : new[] { "nativeCapture", "nativeCaptureKinds" })
+                    .Concat(launch == null ? new string[0] : new[] { "nativeLaunch", "nativeWindowsApplicationLookup" })
                     .ToArray();
             }
         }
@@ -50,6 +51,7 @@ namespace ComputerUse.Windows
         readonly NativeQueryPipeline queries;
         readonly NativeCapturePipeline captures;
         readonly NativeExecution writer;
+        readonly NativeApplicationLaunch launch;
         readonly INativeCaptureBackend capture;
         readonly Action<string, Dictionary<string, object>, NativePointerPoint, bool, int, bool> displayPointer;
         readonly Dictionary<string, string> finished = new Dictionary<string, string>();
@@ -94,24 +96,27 @@ namespace ComputerUse.Windows
         internal NativeRuntime(
             string session, INativeReadBackend reader, NativeExecution writer = null,
             INativeCaptureBackend capture = null,
-            Action<string, Dictionary<string, object>, NativePointerPoint, bool, int, bool> displayPointer = null)
+            Action<string, Dictionary<string, object>, NativePointerPoint, bool, int, bool> displayPointer = null,
+            NativeApplicationLaunch launch = null)
         {
             this.session = session;
             binding = raw => NativeBinding.Resolve(raw, session);
             this.reader = reader;
             this.writer = writer;
+            this.launch = launch;
             this.capture = capture;
             this.displayPointer = displayPointer;
             captures = new NativeCapturePipeline(capture, binding, FinishCurrent, Expire);
             queries = new NativeQueryPipeline(
-                reader, binding,
+                reader, raw => NativeBinding.Resolve(raw, session, allowInstallation: launch != null),
                 writer == null ? null
                                : new Func<NativeWriteOperation, Dictionary<string, object>, string[], Request, object>(
                                      writer.Inspect),
                 FinishCurrent, Expire,
                 writer == null ? null
                                : new Func<NativeWriteOperation, Dictionary<string, object>, Request, object>(
-                                     writer.InspectCurrentReceiver));
+                                     writer.InspectCurrentReceiver),
+                launch);
         }
 
         void FinishCurrent()
@@ -120,7 +125,7 @@ namespace ComputerUse.Windows
                 return;
             PromoteWorkerRetirement();
             string closed = operation, cleanup = write == null ? "complete" : write.Cleanup;
-            var readScope = NativeBinding.IsGlobal(original) ? null : reader;
+            var readScope = NativeBinding.IsGlobal(original) || NativeBinding.IsInstallation(original) ? null : reader;
             if (cleanup != "complete")
                 retired = true;
             operation = null;
@@ -214,8 +219,9 @@ namespace ComputerUse.Windows
                 Wire.Keys(p, "mode,target,intent", "clickContract");
                 string mode = Wire.Str(p, "mode");
                 var intent = Wire.Object(p["intent"]);
-                var target = NativeBinding.Resolve(p["target"], session, allowGlobal: true);
+                var target = NativeBinding.Resolve(p["target"], session, allowGlobal: true, allowInstallation: launch != null);
                 bool global = NativeBinding.IsGlobal(target);
+                bool installation = NativeBinding.IsInstallation(target);
                 Wire.Keys(intent, global ? "kind,parameters,globalInput" : "kind,parameters");
                 string kind = Wire.Str(intent, "kind");
                 var parameters = Wire.Object(intent["parameters"]);
@@ -227,7 +233,13 @@ namespace ComputerUse.Windows
                     NativeGlobalInput.Require(r.GlobalInputAllowed);
                 if (clickV1 && (Wire.Str(p, "clickContract") != "v1" || !writable || kind != "click"))
                     throw new Failure("invalid_request", "clickContract v1 requires a write click operation");
-                if (writable)
+                if (installation)
+                {
+                    if (!writable || kind != "launch" || parameters.Count != 0)
+                        throw new Failure("invalid_request", "an installation binding requires an empty launch intent");
+                    launch.Require(Wire.Str(target, "application"));
+                }
+                else if (writable)
                 {
                     if (writer == null)
                         throw new Failure("unsupported_operation", "this native driver has no input execution provider");
@@ -243,15 +255,16 @@ namespace ComputerUse.Windows
                 if (operation != null)
                     throw new Failure("busy", "another native operation is active");
                 r.Check();
-                NativeResourcePipeline.Acquire(writable, target, r, global ? null : reader,
-                                               writer == null ? null : new Func<Request, IDisposable>(writer.Acquire),
-                                               ref lease, ref retired);
+                if (!installation)
+                    NativeResourcePipeline.Acquire(writable, target, r, global ? null : reader,
+                                                   writer == null ? null : new Func<Request, IDisposable>(writer.Acquire),
+                                                   ref lease, ref retired);
                 operation = Guid.NewGuid().ToString("N");
                 original = target;
                 deadline = r.Deadline;
                 highStep = 0;
                 write = writable ? new NativeWriteOperation(target, intent, clickV1) : null;
-                if (write != null && displayPointer != null)
+                if (write != null && !installation && displayPointer != null)
                 {
                     string displayOperation = operation;
                     var displayTarget = new Dictionary<string, object>(target);
@@ -287,7 +300,7 @@ namespace ComputerUse.Windows
 
         object Execute(Dictionary<string, object> p, Request r)
         {
-            if (writer == null)
+            if (writer == null && launch == null)
                 throw new Failure("unsupported_operation", "this native driver has no input execution provider");
             Wire.Keys(p, "operation,step,command");
             string id = Wire.Str(p, "operation");
@@ -297,11 +310,15 @@ namespace ComputerUse.Windows
             Wire.Str(command, "kind");
             Wire.Str(command, "primitiveId");
             Wire.Bool(command, "foreground");
-            var target = NativeBinding.Resolve(command["target"], session, allowGlobal: true);
+            var target = NativeBinding.Resolve(command["target"], session, allowGlobal: true, allowInstallation: launch != null);
             if (operation == null || id != operation || write == null)
                 throw new Failure("stale_target", "native write operation is unknown or expired");
             if (NativeBinding.IsGlobal(original) && step != 1)
                 throw new Failure("invalid_request", "a global operation dispatches one primitive");
+            bool installation = NativeBinding.IsInstallation(original);
+            if (installation != NativeBinding.IsInstallation(target) ||
+                installation && (step != 1 || !NativeWriteOperation.Same(original, target)))
+                throw new Failure("invalid_request", "an application launch dispatches one primitive in its original scope");
             Step prior;
             if (steps.TryGetValue(step, out prior))
             {
@@ -329,7 +346,8 @@ namespace ComputerUse.Windows
             try
             {
                 r.Check();
-                object result = writer.Execute(write, command, r, operation, step);
+                object result = installation ? launch.Execute(write, target, command, r)
+                                             : writer.Execute(write, command, r, operation, step);
                 PromoteWorkerRetirement();
                 PreserveRetiredReceipt(Wire.Object(result));
                 var copy = new Dictionary<string, object>(command);

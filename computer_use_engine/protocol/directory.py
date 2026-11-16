@@ -72,6 +72,7 @@ _schemas = {
             scope=enum("runningWindows").optional(),
             path=identity.optional(),
             installation=identity.optional(),
+            launchSelector=identity.optional(),
             endedApplications=array(identity, max=4096).optional(),
             nativeProcessNames=array(obj({"application": identity, "name": identity}), max=512).optional(),
             windowTitle=obj({"title": identity, "complete": boolean()}).optional(),
@@ -166,7 +167,18 @@ def decode_directory(value):
             if not native_metadata or item["selector"] in foreground and item["appIsForeground"] is not True:
                 raise ValueError("protocol: window catalogue requires native metadata for the exact instance")
     elif result["kind"] == "applications":
-        if "path" in result or "installation" in result:
+        if "launchSelector" in result and (
+            result["platform"] != "windows"
+            or any(key in result for key in ("path", "installation", "scope", "windowTitle"))
+            or any(item["isRunning"] or not (item["identifier"] or item["path"]) for item in result["applications"])
+        ):
+            raise ValueError("protocol: invalid Windows launch candidate scope")
+        if result["platform"] == "windows" and "installation" in result:
+            if any(key in result for key in ("path", "scope", "windowTitle")) or any(
+                not item["isRunning"] for item in result["applications"]
+            ):
+                raise ValueError("protocol: invalid Windows launch recovery scope")
+        elif "path" in result or "installation" in result:
             paths = {item["path"] for item in result["applications"]}
             scope_error = "protocol: invalid exact application scope"
             if result["platform"] != "macos" or "scope" in result:

@@ -206,6 +206,7 @@ class AgentInterfacePipeline:
             return await self.read_pipeline.run(
                 ui, view, full, menu_path, allow_foreground=allow_foreground, related=related,
                 on_observation=explicit_observation_completed if explicit_read else None,
+                explicit_read=explicit_read,
             )
         except (FixedWindowInvalidated, FixedWindowUnconfirmed) as error:
             # A principal read performs its own later directory collection;

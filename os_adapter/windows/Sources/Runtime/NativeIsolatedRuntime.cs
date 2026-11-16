@@ -452,7 +452,7 @@ namespace ComputerUse.Windows
                 operation = (string)Wire.Object(result)["operation"];
                 writing = Equals(parameters["mode"], "write");
                 readDeadline = request.Deadline;
-                if (writing)
+                if (writing && !NativeBinding.IsInstallation(Wire.Object(parameters["target"])))
                     try
                     {
                         pointer.Begin(operation, Wire.Object(parameters["target"]), Wire.Object(parameters["intent"]));

@@ -39,9 +39,15 @@ namespace ComputerUse.Windows
             switch (kind)
             {
             case "applications":
-                Wire.Keys(query, "kind", "windowTitle");
+                Wire.Keys(query, "kind", "windowTitle,launchSelector,installation");
+                if (query.Count > 2)
+                    throw new Failure("invalid_request", "applications discovery accepts one scope");
                 if (query.ContainsKey("windowTitle") && Wire.Str(query, "windowTitle").Length > 4094)
                     throw new Failure("invalid_request", "windowTitle exceeds the Win32 caption query limit");
+                if (query.ContainsKey("launchSelector"))
+                    Wire.Str(query, "launchSelector");
+                if (query.ContainsKey("installation"))
+                    Wire.Str(query, "installation");
                 break;
             case "surfaces":
                 Wire.Keys(query, "kind,application", "includeAccessibility,rootWindow");
@@ -119,6 +125,8 @@ namespace ComputerUse.Windows
                 Wire.Num(query, "length", 2, 16384, true);
                 break;
             case "launch":
+                Wire.Keys(query, "kind");
+                break;
             case "roots":
                 throw new Failure("unsupported_operation",
                                   "this native Windows slice provides window discovery and raw UIA reading only");

@@ -8,10 +8,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from computer_use.diagnostics import local_failure
+from computer_use.errors import ComputerUseError
 from computer_use.interaction.query.instances.membership import ancestor, interaction_contains
 from computer_use.interaction.read.model import WindowSelectionRequired
 from computer_use.native.contracts import Knowledge
-from computer_use.native.query.directory import SurfaceReadProfile, select_application
+from computer_use.native.query.directory import SurfaceReadProfile, select_application, supports_windows_launch_lookup
 from computer_use.native.scopes import (
     FixedWindowInvalidated,
     FixedWindowUnconfirmed,
@@ -219,7 +220,7 @@ async def refresh(controller, ui, *, accessibility=True):
     return directory
 
 
-async def resolve(controller, ui, view):
+async def resolve(controller, ui, view, *, allow_windows_launch=False):
     """Discover windows, select an observation primary, and retain exact targets."""
     validate_session(controller, ui)
     state = controller.state(ui)
@@ -238,7 +239,15 @@ async def resolve(controller, ui, view):
             if selector.startswith("/")
             else await controller.reader.directory.applications()
         )
-        application = select_application(applications, selector)
+        windows_lookup = allow_windows_launch and supports_windows_launch_lookup(
+            applications, controller.transport.capabilities,
+        )
+        try:
+            application = select_application(applications, selector, allow_windows_lookup=windows_lookup)
+        except ComputerUseError as error:
+            if not windows_lookup or error.code != "element_not_found" or error.effect != "none":
+                raise
+            return await observe_application(controller, ui, selector, view, source_applications=applications)
         if not application["isRunning"]:
             return await observe_application(controller, ui, selector, view, source_applications=applications)
         state.running = RunningApplication(application["id"], application["displayName"], applications["session"])

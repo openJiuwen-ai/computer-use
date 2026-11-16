@@ -12,6 +12,16 @@ from enum import Enum
 from computer_use.errors import ComputerUseError
 from computer_use.native.contracts import Binding
 
+WINDOWS_APPLICATION_LOOKUP = "nativeWindowsApplicationLookup"
+
+
+def supports_windows_launch_lookup(directory, capabilities):
+    return (
+        WINDOWS_APPLICATION_LOOKUP in capabilities
+        and directory.get("platform") == "windows"
+        and directory.get("scope") == "runningWindows"
+    )
+
 
 def _refuse(code, detail, target="working window"):
     raise ComputerUseError(
@@ -60,11 +70,24 @@ def _running_match(directory, installation):
     return dict(running[0])
 
 
-def select_application(directory, selector):
+def select_application(directory, selector, *, allow_windows_lookup=False):
     """Resolve observed facts in Python; selection never starts an application."""
     if not isinstance(selector, str) or not selector.strip():
         raise ValueError("A nonempty application selector is required")
     entries = directory["applications"]
+    if directory.get("launchSelector") == selector:
+        if directory["stopReasons"]:
+            _refuse("observation_incomplete", directory["stopReasons"][0], "application")
+        if len(entries) == 1:
+            return dict(entries[0])
+        if not entries:
+            _refuse("element_not_found", f"No Windows launch entry matches {selector}.", "application")
+        choices = ", ".join(f"{item['displayName']} ({item['identifier'] or item['path']})" for item in entries)
+        _refuse(
+            "ambiguous_target",
+            f"Several Windows apps match {selector}. Choose an application ID: {choices}.",
+            "application",
+        )
     exact = [item for item in entries if item["id"] == selector]
     if exact:
         return _running_match(directory, exact[0])
@@ -87,16 +110,24 @@ def select_application(directory, selector):
     active = [item for item in matches if item["isRunning"]]
     matches = active or matches
     if directory["stopReasons"]:
+        native_processes = directory.get("nativeProcessNames")
         exact_windows_process = (
             directory.get("platform") == "windows"
             and directory.get("scope") == "runningWindows"
             and len(matches) == 1
             and matches[0]["isRunning"]
             and [
-                row["application"] for row in directory.get("nativeProcessNames", ()) if row["name"].casefold() == name
+                row["application"] for row in native_processes or () if row["name"].casefold() == name
             ] == [matches[0]["id"]]
         )
-        if not exact_windows_process:
+        # Win32 can complete independently of the optional desktop UIA supplement.
+        # An exact ID or a missing selector can proceed with this native evidence.
+        complete_win32_lookup = allow_windows_lookup and native_processes is not None and (
+            not matches or len(matches) == 1 and matches[0]["identifier"] == selector and any(
+                row["application"] == matches[0]["id"] for row in native_processes
+            )
+        )
+        if not (exact_windows_process or complete_win32_lookup):
             _refuse(
                 "observation_incomplete",
                 "Application discovery is partial; application identity is unresolved.",
@@ -104,6 +135,8 @@ def select_application(directory, selector):
             )
     if len(matches) != 1:
         if not matches and directory.get("scope") == "runningWindows":
+            if allow_windows_lookup:
+                _refuse("element_not_found", f"No observed running window matches {selector}.", "application")
             _refuse(
                 "element_not_found",
                 "No observed running window matches "
@@ -124,11 +157,11 @@ def select_application(directory, selector):
 def applications_query(selector=None, *, installation=None, capabilities=()):
     """Resolve exact paths or retained installations on the driver host."""
     query = dict(kind="applications")
-    if "nativeApplicationPath" in capabilities:
-        if installation is not None:
+    if installation is not None:
+        if "nativeApplicationPath" in capabilities or WINDOWS_APPLICATION_LOOKUP in capabilities:
             query["installation"] = installation
-        elif selector is not None and selector.startswith("/"):
-            query["path"] = selector
+    elif "nativeApplicationPath" in capabilities and selector is not None and selector.startswith("/"):
+        query["path"] = selector
     return query
 
 

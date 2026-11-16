@@ -54,6 +54,8 @@ class Computer:
     def list_windows(self, *, app_name: str) -> WindowCatalogue: ...
 
     # Select by application reference or name/path/bundle selector; first App.read may launch an installed app.
+    # Windows: list_apps covers running windows. A first App.read can look up and open a named
+    # Start menu app, an exact application ID, or an absolute .exe path. Confirm the resulting window.
     @overload
     def app(self, selector: int | str) -> App: ...
     # Windows: first read binds a unique, exact, case-sensitive visible title; retain the App after renames.

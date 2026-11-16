@@ -236,7 +236,7 @@ namespace ComputerUse.Windows
             }
         }
 
-        static Dictionary<string, object> Stamp(double start)
+        internal static Dictionary<string, object> Stamp(double start)
         {
             return Wire.Obj("id", NativeReadStore.Token("observation"), "startedAt", Math.Floor(start), "completedAt",
                             Math.Max(Math.Floor(start), Math.Ceiling(Wire.Now)));
@@ -1385,7 +1385,7 @@ namespace ComputerUse.Windows
                 RetainOpaque, cachedFailures, outside);
         }
 
-        static object[] ApplicationRows(IEnumerable<NativeWindowRecord> windows)
+        internal static object[] ApplicationRows(IEnumerable<NativeWindowRecord> windows)
         {
             return windows.GroupBy(x => x.Application).Select(g =>
             {

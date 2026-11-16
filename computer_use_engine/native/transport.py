@@ -216,6 +216,12 @@ class ConnectionPort:
     async def directory(self, operation, target, query, timeout_ms):
         if "nativeDirectory" not in self.capabilities:
             raise RuntimeError("This driver does not provide the native discovery contract")
+        if "launchSelector" in query and (
+            self.platform != "windows" or "nativeWindowsApplicationLookup" not in self.capabilities
+        ):
+            raise local_failure(
+                "Windows launch lookup requires a supporting Windows driver", "unsupported_operation"
+            )
         if "windowTitle" in query and (
             self.platform != "windows"
             or not {"nativeWindowTitleSelection", "nativeStrictWindowRead"} <= set(self.capabilities)
@@ -245,7 +251,7 @@ class ConnectionPort:
                 and result["application"] != query["application"]
                 or result["platform"] != self.platform
                 or query["kind"] == "applications" and (
-                    any(result.get(key) != query.get(key) for key in ("path", "installation"))
+                    any(result.get(key) != query.get(key) for key in ("path", "installation", "launchSelector"))
                     or ("endedApplications" in result) != (query.get("includeEnded") is True)
                 )
             )

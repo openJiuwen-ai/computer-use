@@ -51,7 +51,7 @@ from computer_use.interaction.read.app_read.passes.validate_explicit_startup imp
 )
 from computer_use.interaction.read.app_read.startup.pipeline import StartupServiceNode
 from computer_use.native.contracts import ApplicationBinding, Dispatch, Intent
-from computer_use.native.query.directory import applications_query, surfaces_query
+from computer_use.native.query.directory import applications_query, surfaces_query, supports_windows_launch_lookup
 from computer_use.native.scopes import PendingApplicationLaunch
 from computer_use.pipeline import Contract, Effect, Pipeline, Scope, Select, Sequence
 from computer_use.pipeline.core import Node
@@ -128,7 +128,18 @@ class DirectorySelectionPipeline(Pipeline["ReadCall", "ApplicationSelection"]):
                         )
                     elif applications["session"] != read.target.session:
                         raise failure("stale_target", "The selected installation belongs to a previous driver session.")
-                    application = select_application(applications, selector)
+                    windows_lookup = window is None and request.allow_launch and supports_windows_launch_lookup(
+                        applications, services.port.connection.capabilities,
+                    )
+                    try:
+                        application = select_application(applications, selector, allow_windows_lookup=windows_lookup)
+                    except ComputerUseError as error:
+                        if not windows_lookup or error.code != "element_not_found" or error.effect != "none":
+                            raise
+                        applications = await services.directory.collect(
+                            read, {"kind": "applications", "launchSelector": selector}, _control=control,
+                        )
+                        application = select_application(applications, selector)
                     if not application["isRunning"]:
                         pending = services.pending_launches.get(application["id"])
                 if pending is not None:
@@ -220,10 +231,10 @@ class _LaunchDispatch(Node["ApplicationSelection", "ApplicationSelection"]):
                 if pipeline.state.dispatched != Dispatch.NOT_DISPATCHED or (
                     isinstance(error, ComputerUseError) and error.effect in ("possible", "partial")
                 ):
-                    selectors = tuple(
-                        selector for selector in (value.request.selector, value.application.get("path"))
-                        if isinstance(selector, str)
-                    )
+                    candidates = (value.request.selector, value.application.get("path"))
+                    if value.applications.get("platform") == "windows":
+                        candidates += (value.application.get("identifier"),)
+                    selectors = tuple(selector for selector in candidates if isinstance(selector, str))
                     self.services.pending_launches[installation] = PendingApplicationLaunch(
                         session, installation, selectors
                     )

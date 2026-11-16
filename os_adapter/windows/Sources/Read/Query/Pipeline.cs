@@ -13,12 +13,14 @@ namespace ComputerUse.Windows
         readonly Func<object, Dictionary<string, object>> binding;
         readonly Func<NativeWriteOperation, Dictionary<string, object>, string[], Request, object> inspectInput;
         readonly Func<NativeWriteOperation, Dictionary<string, object>, Request, object> inspectCurrentReceiver;
+        readonly NativeApplicationLaunch launch;
         readonly Action finish, expire;
         internal NativeQueryPipeline(
             INativeReadBackend reader, Func<object, Dictionary<string, object>> binding,
             Func<NativeWriteOperation, Dictionary<string, object>, string[], Request, object> inspectInput,
             Action finish, Action expire,
-            Func<NativeWriteOperation, Dictionary<string, object>, Request, object> inspectCurrentReceiver = null)
+            Func<NativeWriteOperation, Dictionary<string, object>, Request, object> inspectCurrentReceiver = null,
+            NativeApplicationLaunch launch = null)
         {
             this.reader = reader;
             this.binding = binding;
@@ -26,6 +28,7 @@ namespace ComputerUse.Windows
             this.finish = finish;
             this.expire = expire;
             this.inspectCurrentReceiver = inspectCurrentReceiver;
+            this.launch = launch;
         }
 
         internal object Run(Dictionary<string, object> p, Request r, NativeOperationView state)
@@ -37,9 +40,16 @@ namespace ComputerUse.Windows
             try
             {
                 r.ObservationDeadline = Math.Min(r.Deadline, Wire.Now + Request.ObservationMs);
+                bool launchContract = (string)scope.Query["kind"] == "launch";
+                bool launchLookup = scope.Query.ContainsKey("launchSelector") || scope.Query.ContainsKey("installation");
+                if ((launchContract || launchLookup) && launch == null)
+                    throw new Failure("unsupported_operation", "this native driver has no Windows launch provider");
+                if (launchContract)
+                    return EncodeNativeFactsPass.Run(launch.Inspect(state.Write, scope.Target, r), r);
                 ValidateQueryTargetPass.Run(scope, r, reader);
                 CheckQueryOperationPass.Run(scope, state.Write, inspectInput != null);
-                var result = (string)scope.Query["kind"] == "inputContext"
+                var result = launchLookup ? launch.Lookup(scope.Query, r)
+                             : (string)scope.Query["kind"] == "inputContext"
                                  ? scope.Query.ContainsKey("currentReceiver")
                                        ? CollectCurrentReceiverPass.Run(scope, r, state.Write, inspectCurrentReceiver)
                                        : CollectInputContextPass.Run(scope, r, state.Write, inspectInput)

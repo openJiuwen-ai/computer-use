@@ -222,6 +222,7 @@ class InterfaceReadPipeline:
         allow_foreground: bool = False,
         related: RelatedRead | None = None,
         on_observation=None,
+        explicit_read=False,
     ) -> Observation:
         """Read the handle's interface scope and publish its combined observation.
 
@@ -235,42 +236,50 @@ class InterfaceReadPipeline:
         # pylint: disable-next=protected-access
         controller, instance = self.controller, ui._instance
         try:
-            directory, first = await resolve(controller, ui, view)
+            directory, first = await resolve(
+                controller, ui, view, allow_windows_launch=explicit_read and menu_path is None,
+            )
         except ComputerUseError as error:
             await self._reconcile_close_application(related, instance.directory, error)
             raise
         # pylint: disable-next=protected-access
         instance = ui._instance
+        launch = first.launch if isinstance(first, AppObservation) else first
+        windows_launch = launch if directory.get("platform") == "windows" and isinstance(launch, Mapping) else None
         preparation = None
-        # pylint: disable-next=protected-access
-        if allow_foreground and (ui._anchor is not None or instance.anchor is not None):
-            permitted = allowed(ui)
+        try:
             # pylint: disable-next=protected-access
-            anchor = ui._anchor or instance.anchor.root.root_window
-            options = {"follow_modal": False} if getattr(ui, "_strict_window", False) else {}
-            current = select_surface(directory, anchor, **options)
-            item = next((item for item in permitted.values() if item["surface"] == current.surface), None)
-            if item is None:
-                raise local_failure("the observation window is not confirmed in this instance")
-            preparation = await ObservationPreparationPipeline(controller.port).arun(member_target(instance, item))
-        elif allow_foreground and menu_path is None:
-            if first is None and related is None and can_reopen_application(controller, directory):
+            if allow_foreground and (ui._anchor is not None or instance.anchor is not None):
+                permitted = allowed(ui)
+                # pylint: disable-next=protected-access
+                anchor = ui._anchor or instance.anchor.root.root_window
+                options = {"follow_modal": False} if getattr(ui, "_strict_window", False) else {}
+                current = select_surface(directory, anchor, **options)
+                item = next((item for item in permitted.values() if item["surface"] == current.surface), None)
+                if item is None:
+                    raise local_failure("the observation window is not confirmed in this instance")
+                preparation = await ObservationPreparationPipeline(controller.port).arun(member_target(instance, item))
+            elif (
+                allow_foreground and menu_path is None and first is None and related is None
+                and can_reopen_application(controller, directory)
+            ):
                 target = ApplicationBinding(directory["session"], directory["application"])
                 preparation = await ObservationPreparationPipeline(controller.port).arun(target)
-        try:
             if preparation is not None:
                 # Raising may change geometry, focus or modal membership. Reuse the
                 # original instance and refresh before any pixels are collected.
                 directory = await refresh_after_preparation(controller, ui, view, preparation)
-                first = None
+                first = windows_launch
             return await self._collect(
                 ui, view, full, menu_path, directory, first, preparation, related, on_observation,
             )
         except BaseException as error:
-            if preparation is not None:
-                annotated = annotate_preparation_failure(error, preparation)
-                if annotated is not error:
-                    raise annotated from error
+            annotated = annotate_preparation_failure(error, preparation) if preparation is not None else error
+            if windows_launch is not None:
+                # pylint: disable-next=protected-access
+                annotated = controller.reader._after_launch(annotated, windows_launch)
+            if annotated is not error:
+                raise annotated from error
             raise
 
     async def _reconcile_close_application(self, related, directory, error):
@@ -939,6 +948,8 @@ class InterfaceReadPipeline:
         lines.insert(0, DisplayText("interface_header", (header,)))
         if isinstance(first, AppObservation) and first.launch:
             lines.insert(1, template("Launch: {0}", first.launch["detail"]))
+        elif directory.get("platform") == "windows" and isinstance(first, Mapping) and "detail" in first:
+            lines.insert(1, template("Launch: {0}", first["detail"]))
         trees = []
         member_trees = {}
         presentation_exhausted = any(not part.snapshots_numbered for _, part in displayed_parts)

@@ -125,6 +125,10 @@ macOS 可用 `computer.list_windows(app_name=display_name)` 按准确显示名�
 Windows 可用 `computer.app(window_title=title)` 绑定完整标题对应的唯一窗口。
 macOS 和 Windows 支持 `app.close_window(ref)`，保存确认由调用方处理。
 
+**Windows 应用启动。** 首次显式调用 `app.read()` 时，SDK 先查找正在运行的窗口。需要启动时，可用当前用户
+开始菜单中的准确显示名、应用 ID（包括 AUMID）或绝对 `.exe` 路径指定应用。若名称匹配多个启动项，
+错误中会提供可选应用 ID。SDK 确认匹配窗口后继续读取界面。`computer.list_apps()` 仍列出有可观察窗口的运行应用。
+
 **截图坐标。** 使用实际展示图片的像素，原点在左上角。按图片旁的示例创建定位值，由 SDK 换算缩放和位置。
 
 ```python
