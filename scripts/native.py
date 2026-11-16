@@ -81,13 +81,19 @@ def build_mac_os(root=None, *, configuration="release"):
     native = root / "os_adapter/macos"
     run("swift", ["build", "-c", configuration], native)
     binary = Path(run("swift", ["build", "-c", configuration, "--show-bin-path"], native, True))
-    bundle = native / ".build/Jiuwen CUA.app"
+    executable = _bundle_macos_driver(root, binary / "computer-use-driver")
+    report(executable)
+    return executable
+
+
+def _bundle_macos_driver(root, binary):
+    bundle = root / "os_adapter/macos/.build/Jiuwen CUA.app"
     contents = bundle / "Contents"
     icon = contents / "Resources/AppIcon.icns"
     _build_macos_icon(root / "os_adapter/assets/agent-pointer/cursor.svg", icon)
     executable = contents / "MacOS/computer-use-driver"
     executable.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(binary / "computer-use-driver", executable)
+    shutil.copy2(binary, executable)
     bundle_id = "com.openjiuwen.cua"
     (contents / "Info.plist").write_bytes(plistlib.dumps({
         "CFBundleIdentifier": bundle_id,
@@ -102,10 +108,9 @@ def build_mac_os(root=None, *, configuration="release"):
         "LSUIElement": True,
         "NSScreenCaptureUsageDescription": "Jiuwen CUA uses screen recording to show windows and the desktop to your agent.",
     }))
-    run("codesign", ["--force", "--sign", "-", "--identifier", bundle_id, bundle], native)
+    run("codesign", ["--force", "--sign", "-", "--identifier", bundle_id, bundle])
     # Launch Services uses the bundle's timestamp, including on in-place builds.
     bundle.touch()
-    report(executable)
     return executable
 
 

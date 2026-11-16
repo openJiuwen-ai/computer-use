@@ -191,12 +191,14 @@ class Connection:
             )
         self._buffer, self._diagnostic, self._next_id = bytearray(), "", 1
         self._traces = {}
-        provenance = startup_provenance(command)
+        lifetime = 4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1
         if sys.platform == "darwin" and (bundle := driver.get("app_bundle")) is not None:
             from computer_use.native.macos_app import start_app
 
-            child = await start_app(bundle, lifetime_fd=4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1)
-            self._attach(child, command, provenance, uses_eof=True)
+            provenance = startup_provenance(command)
+            self._child = await start_app(bundle, lifetime_fd=lifetime)
+            self._child_uses_eof = True
+            self._track_child(self._child, command, provenance)
             return
 
         windows = sys.platform == "win32"
@@ -204,9 +206,9 @@ class Connection:
         # and preview pipe are not part of its driver's transport contract.
         preview = get_preview_handler() if not windows else None
         read_fd = write_fd = -1
-        lifetime = 4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1
         if preview is not None:
             read_fd, write_fd = os.pipe()
+        provenance = startup_provenance(command)
         try:
             env = dict(os.environ)
             if windows:
@@ -240,21 +242,18 @@ class Connection:
         finally:
             if write_fd >= 0:
                 os.close(write_fd)
-        self._attach(child, command, provenance, uses_eof=windows)
+        self._child = child
+        self._child_uses_eof = windows
         if preview is not None:
             reader = asyncio.StreamReader()
             transport, _ = await asyncio.get_running_loop().connect_read_pipe(
                 lambda: asyncio.StreamReaderProtocol(reader), os.fdopen(read_fd, "rb", buffering=0)
             )
-            if self._child is child:
-                self._preview_transport = transport
-                self._track(read_previews(reader, preview))
-            else:
-                transport.close()
+            self._preview_transport = transport
+            self._track(read_previews(reader, preview))
+        self._track_child(child, command, provenance)
 
-    def _attach(self, child, command, provenance, *, uses_eof):
-        self._child = child
-        self._child_uses_eof = uses_eof
+    def _track_child(self, child, command, provenance):
         diagnostic(
             dict(
                 kind="connection",
@@ -274,9 +273,7 @@ class Connection:
     def _on_exit(self):
         child = self._child
         if child is not None and child.returncode is None:
-            # TerminateProcess cannot run the driver's finally blocks. EOF
-                # lets the native reader cancel work and release paired input,
-                # including when Launch Services owns the process.
+            # EOF lets drivers owned by Windows or Launch Services unwind input.
             try:
                 if self._child_uses_eof:
                     child.stdin.close()

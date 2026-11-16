@@ -25,8 +25,6 @@ uv run --python 3.12 --no-sync computer-use-build
 uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-On macOS, the first operation that needs a missing permission requests it from the system. You can also run `uv run --python 3.12 --no-sync computer-use-permissions --request` to start setup. Grant **Jiuwen CUA** access in **System Settings → Privacy & Security**, then run the check again. If it is absent from the Screen Recording list, use the app path printed by the permission command to add it.
-
 ## 3. Create a desktop agent
 
 For a wheel installation, select the `agent` extra. It includes MCP and requires `openjiuwen>=0.1.19.post3`.

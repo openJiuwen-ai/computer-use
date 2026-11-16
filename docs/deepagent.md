@@ -25,8 +25,6 @@ uv run --python 3.12 --no-sync computer-use-build
 uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-macOS 在首次用到缺失权限时发起系统授权请求。也可以先运行 `uv run --python 3.12 --no-sync computer-use-permissions --request`，按提示在**系统设置 → 隐私与安全**中为 **Jiuwen CUA** 授权，然后重新检查。录屏列表缺少该项时，请用权限命令给出的 App 路径添加。
-
 ## 3. 创建电脑操作 Agent
 
 通过 wheel 安装时选择 `agent` extra，其中包含 MCP，并要求 `openjiuwen>=0.1.19.post3`。

@@ -7,7 +7,7 @@ import os
 import signal
 import socket
 import subprocess
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -74,7 +74,6 @@ class MacAppProcess:
 async def start_app(bundle, *, lifetime_fd):
     """Hand the existing protocol pipes to a fresh Launch Services app instance."""
     loop = asyncio.get_running_loop()
-    pid, launcher = None, None
     # Darwin Unix socket paths are limited to 103 bytes. Use a private directory
     # on a short path independent of the installation and TMPDIR.
     with (
@@ -94,41 +93,37 @@ async def start_app(bundle, *, lifetime_fd):
         host.callback(stdin.close)
         stdout = await _reader(loop, output_read, host)
         stderr = await _reader(loop, error_read, host)
+        launcher = await asyncio.create_subprocess_exec(
+            *_launch(bundle),
+            "--args", "--connect-stdio", endpoint,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        accepted = asyncio.create_task(loop.sock_accept(listener))
+        exited = asyncio.create_task(launcher.wait())
         try:
-            launcher = await asyncio.create_subprocess_exec(
-                *_launch(bundle),
-                "--args", "--connect-stdio", endpoint,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            accepted = asyncio.create_task(loop.sock_accept(listener))
-            exited = asyncio.create_task(launcher.wait())
-            try:
-                await asyncio.wait((accepted, exited), return_when=asyncio.FIRST_COMPLETED)
-                if not accepted.done():
-                    detail = (await launcher.stderr.read()).decode(errors="replace").strip()
-                    raise RuntimeError(detail or "Jiuwen CUA exited before connecting to the SDK.")
-                peer, _ = accepted.result()
-                peer_pid = peer.getsockopt(_SOL_LOCAL, _LOCAL_PEERPID)
-                if peer_pid <= 1:
-                    raise RuntimeError("Jiuwen CUA connected without a process identity.")
-                pid = peer_pid
-                files = [input_read.fileno(), output_write.fileno(), error_write.fileno()]
-                if lifetime_fd >= 0:
-                    files.append(lifetime_fd)
-                socket.send_fds(peer, [b"J"], files)
-            finally:
-                exited.cancel()
-                if not accepted.cancel() and not accepted.cancelled() and accepted.exception() is None:
-                    accepted.result()[0].close()
+            await asyncio.wait((accepted, exited), return_when=asyncio.FIRST_COMPLETED)
+            if not accepted.done():
+                detail = (await launcher.stderr.read()).decode(errors="replace").strip()
+                raise RuntimeError(detail or "Jiuwen CUA exited before connecting to the SDK.")
+            peer, _ = accepted.result()
+            pid = peer.getsockopt(_SOL_LOCAL, _LOCAL_PEERPID)
+            if pid <= 1:
+                raise RuntimeError("Jiuwen CUA connected without a process identity.")
+            files = [input_read.fileno(), output_write.fileno(), error_write.fileno()]
+            if lifetime_fd >= 0:
+                files.append(lifetime_fd)
+            socket.send_fds(peer, [b"J"], files)
         except BaseException:
             # Closing the broker and the pipes also lets a late app exit.
-            if launcher is not None and launcher.returncode is None:
-                try:
+            if launcher.returncode is None:
+                with suppress(ProcessLookupError):
                     launcher.kill()
-                except ProcessLookupError:
-                    pass
             raise
+        finally:
+            exited.cancel()
+            if not accepted.cancel() and not accepted.cancelled() and accepted.exception() is None:
+                accepted.result()[0].close()
         host.pop_all()  # The asyncio transports now own their end of each pipe.
         return MacAppProcess(launcher, pid, stdin, stdout, stderr)

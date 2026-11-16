@@ -33,35 +33,24 @@ COMMIT = "a" * 40
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Renders the bundle icon with macOS tools.")
-def test_macos_bundle_embeds_the_pointer_icon(tmp_path, monkeypatch):
-    pointer = import_module("computer_use_native_tools.pointer")
-    monkeypatch.setattr(pointer, "generate_pointer_assets", lambda **_: None)
+def test_macos_bundle_embeds_the_pointer_icon(tmp_path):
     artwork = Path("os_adapter/assets/agent-pointer/cursor.svg")
     cursor = tmp_path / artwork
     cursor.parent.mkdir(parents=True)
     cursor.write_bytes((ROOT / artwork).read_bytes())
-    compiled = tmp_path / "compiled"
-    compiled.mkdir()
-    (compiled / "computer-use-driver").touch()
     bundle = (tmp_path / MAC_DRIVER).parents[2]
     (bundle / "Contents").mkdir(parents=True)
     os.utime(bundle, (1, 1))
-    run = native.run
+    binary = tmp_path / "driver"
+    binary.write_bytes(Path("/usr/bin/true").read_bytes())
+    binary.chmod(0o755)
 
-    def build(command, args, cwd=None, capture=False):
-        if command == "swift":
-            return str(compiled)
-        if command == "codesign":
-            return None
-        return run(command, args, cwd, capture)
-
-    monkeypatch.setattr(native, "run", build)
-    contents = native.build_mac_os(tmp_path).parents[1]
+    contents = native._bundle_macos_driver(tmp_path, binary).parents[1]
     assert bundle.stat().st_mtime > 1
     metadata = plistlib.loads((contents / "Info.plist").read_bytes())
     icon = contents / "Resources" / metadata["CFBundleIconFile"]
     iconset = tmp_path / "Unpacked.iconset"
-    run("/usr/bin/iconutil", ["-c", "iconset", icon, "-o", iconset], capture=True)
+    native.run("/usr/bin/iconutil", ["-c", "iconset", icon, "-o", iconset], capture=True)
     for name, size in (("icon_16x16.png", 16), ("icon_512x512@2x.png", 1024)):
         with Image.open(iconset / name) as image:
             assert image.size == (size, size)
@@ -101,31 +90,23 @@ def test_platform_wheel_uses_cached_driver_without_compiling(installed, monkeypa
 
 
 @pytest.mark.parametrize(("prompt", "flag"), [(False, "--check-permissions"), (True, "--request-permissions")])
-def test_macos_permissions_launch_the_app_that_owns_access(tmp_path, monkeypatch, prompt, flag):
+def test_macos_permissions_launch_the_app_that_owns_access(tmp_path, monkeypatch, caplog, prompt, flag):
     monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(paths, "repository_root", lambda: tmp_path)
     executable = tmp_path / MAC_DRIVER
     executable.parent.mkdir(parents=True)
     executable.touch()
-    expected_status = {"accessibility": True, "screenCapture": False, "input": True}
+    status = {"accessibility": True, "screenCapture": False, "input": True, "executable": str(executable)}
 
     def launch(command, **kwargs):
         assert command[0] == "/usr/bin/open"
         assert Path(command[command.index("-a") + 1]) == executable.parents[2].resolve()
         assert command[-2:] == ["--args", flag]
-        Path(command[command.index("--stdout") + 1]).write_text(json.dumps(expected_status), encoding="utf-8")
+        Path(command[command.index("--stdout") + 1]).write_text(json.dumps(status), encoding="utf-8")
         return subprocess.CompletedProcess(command, 0, stderr="")
 
     monkeypatch.setattr(subprocess, "run", launch)
-    assert native.read_permissions(prompt, root=tmp_path) == expected_status
-
-
-def test_macos_screen_recording_setup_gives_the_app_path(tmp_path, monkeypatch, caplog):
-    monkeypatch.setattr(sys, "platform", "darwin")
-    executable = tmp_path / MAC_DRIVER
-    monkeypatch.setattr(native, "read_permissions", lambda *args, **kwargs: {
-        "accessibility": True, "screenCapture": False, "input": True, "executable": str(executable),
-    })
-    assert native.permissions([]) == 1
+    assert native.permissions(["--request"] if prompt else []) == 1
     assert "⇧⌘G" in caplog.text
     assert str(executable.parents[2]) in caplog.text
 
