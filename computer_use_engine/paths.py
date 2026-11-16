@@ -13,7 +13,7 @@ from functools import lru_cache
 from pathlib import Path
 from time import sleep
 
-from .native.linux_desktop import DESKTOP_UNAVAILABLE
+from .native.desktop_probe import DESKTOP_UNAVAILABLE
 
 _LOG = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ def _linux_desktop_unavailable_reason() -> str | None:
     session_variables = ("DISPLAY", "WAYLAND_DISPLAY", "AT_SPI_BUS_ADDRESS", "DBUS_SESSION_BUS_ADDRESS")
     if os.environ.get("XDG_SESSION_TYPE") != "wayland" and not any(map(os.getenv, session_variables)):
         return "backend_missing"
-    probe = Path(__file__).with_name("native") / "linux_desktop.py"
+    probe = Path(__file__).with_name("native") / "desktop_probe.py"
     try:
         result = subprocess.run(
             [linux_python(), "-I", str(probe)],

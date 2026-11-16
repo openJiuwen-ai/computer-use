@@ -16,7 +16,7 @@ import pytest
 import setuptools
 from computer_use import paths
 from computer_use.errors import ComputerUseError
-from computer_use.native import linux_desktop
+from computer_use.native import desktop_probe
 from computer_use.native.connection import Connection
 from computer_use_native_tools import native
 
@@ -344,19 +344,19 @@ def test_linux_installed_driver_reports_missing_desktop_without_preparing_runtim
 def test_linux_desktop_checks_both_displays(monkeypatch, x11_available, wayland_available):
     monkeypatch.setenv("DISPLAY", ":0")
     monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
-    monkeypatch.setattr(linux_desktop, "_display_reachable", lambda *, wayland: (
+    monkeypatch.setattr(desktop_probe, "_display_reachable", lambda *, wayland: (
         wayland_available if wayland else x11_available
     ))
-    monkeypatch.setattr(linux_desktop, "_accessibility_reachable", lambda: False)
+    monkeypatch.setattr(desktop_probe, "_accessibility_reachable", lambda: False)
 
-    assert linux_desktop.desktop_available() is (x11_available or wayland_available)
+    assert desktop_probe.desktop_available() is (x11_available or wayland_available)
 
 
 def test_linux_display_with_missing_library_symbol_is_unavailable(monkeypatch):
     library = SimpleNamespace(wl_display_connect=Mock(return_value=1), wl_display_disconnect=Mock())
-    monkeypatch.setattr(linux_desktop.ctypes, "CDLL", lambda _: library)
+    monkeypatch.setattr(desktop_probe.ctypes, "CDLL", lambda _: library)
 
-    assert linux_desktop._display_reachable(wayland=True) is False
+    assert desktop_probe._display_reachable(wayland=True) is False
     library.wl_display_connect.assert_not_called()
 
 
@@ -373,7 +373,7 @@ def test_linux_backend_distinguishes_desktop_absence_and_probe_failure(
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setenv("DISPLAY", ":0")
     monkeypatch.setenv("COMPUTER_USE_PYTHON", sys.executable)
-    probe = resources.parent / "native/linux_desktop.py"
+    probe = resources.parent / "native/desktop_probe.py"
     probe.parent.mkdir()
     probe.write_text(probe_code, encoding="utf-8")
     if editable:
