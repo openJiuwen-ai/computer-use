@@ -23,6 +23,18 @@ import AppKit
         }
     }
 
+    static func permissionStatus(request: Bool = false) -> [String: Any] {
+        if request {
+            for permission in DesktopPermission.allCases where !permission.granted {
+                permission.request()
+            }
+        }
+        return [
+            "accessibility": DesktopPermission.accessibility.granted, "screenCapture": DesktopPermission.screenCapture.granted,
+            "input": DesktopPermission.postEvents.granted, "executable": Bundle.main.executablePath ?? CommandLine.arguments[0]
+        ]
+    }
+
     func shutdown(code: Int32) {
         guard !requests.stopping else { return }
         let operation = requests.cancel()

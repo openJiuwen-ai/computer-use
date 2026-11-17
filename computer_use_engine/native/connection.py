@@ -191,21 +191,12 @@ class Connection:
             )
         self._buffer, self._diagnostic, self._next_id = bytearray(), "", 1
         self._traces = {}
-        lifetime = 4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1
-        if sys.platform == "darwin" and (bundle := driver.get("app_bundle")) is not None:
-            from computer_use.native.macos_app import start_app
-
-            provenance = startup_provenance(command)
-            self._child = await start_app(bundle, lifetime_fd=lifetime)
-            self._child_uses_eof = True
-            self._track_child(self._child, command, provenance)
-            return
-
         windows = sys.platform == "win32"
         # Windows uses native stdio handles. The POSIX 3/4 descriptor bridge
         # and preview pipe are not part of its driver's transport contract.
         preview = get_preview_handler() if not windows else None
         read_fd = write_fd = -1
+        lifetime = 4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1
         if preview is not None:
             read_fd, write_fd = os.pipe()
         provenance = startup_provenance(command)
@@ -251,9 +242,6 @@ class Connection:
             )
             self._preview_transport = transport
             self._track(read_previews(reader, preview))
-        self._track_child(child, command, provenance)
-
-    def _track_child(self, child, command, provenance):
         diagnostic(
             dict(
                 kind="connection",
@@ -273,7 +261,8 @@ class Connection:
     def _on_exit(self):
         child = self._child
         if child is not None and child.returncode is None:
-            # EOF lets drivers owned by Windows or Launch Services unwind input.
+            # TerminateProcess cannot run the driver's finally blocks. EOF
+            # lets its reader cancel native work and release paired input.
             try:
                 if self._child_uses_eof:
                     child.stdin.close()
@@ -475,11 +464,8 @@ class Connection:
         # an unrelated successor that another scope has already established.
         self._check_retained_session()
         try:
-            try:
-                async with asyncio.timeout(remaining() / 1000):
-                    await self._connect()
-            except TimeoutError as error:
-                raise local_failure("native driver launch timed out", "execution_failed", "connection") from error
+            remaining()
+            await self._connect()
             await self._negotiate(remaining())
         except asyncio.CancelledError:
             self.close(RuntimeError("connection request cancelled before dispatch"))

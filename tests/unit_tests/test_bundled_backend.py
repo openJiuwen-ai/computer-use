@@ -3,8 +3,6 @@
 import asyncio
 import hashlib
 import json
-import os
-import plistlib
 import runpy
 import subprocess
 import sys
@@ -21,40 +19,14 @@ from computer_use.errors import ComputerUseError
 from computer_use.native import desktop_probe
 from computer_use.native.connection import Connection
 from computer_use_native_tools import native
-from PIL import Image
 
-MAC_DRIVER = "os_adapter/macos/.build/Jiuwen CUA.app/Contents/MacOS/computer-use-driver"
+MAC_DRIVER = "os_adapter/macos/.build/ComputerUseDriver.app/Contents/MacOS/computer-use-driver"
 MAC_TAG = "macosx_14_0_arm64"
 WINDOWS_DRIVER = "os_adapter/windows/.build/computer-use-driver.exe"
 LINUX_WHEEL = "os_adapter/linux/.build/openjiuwen_computeruse_linux-0.0.1-py3-none-any.whl"
 LINUX_LOCK = "os_adapter/linux/requirements.lock"
 ROOT = Path(__file__).resolve().parents[2]
 COMMIT = "a" * 40
-
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="Renders the bundle icon with macOS tools.")
-def test_macos_bundle_embeds_the_pointer_icon(tmp_path):
-    artwork = Path("os_adapter/assets/agent-pointer/cursor.svg")
-    cursor = tmp_path / artwork
-    cursor.parent.mkdir(parents=True)
-    cursor.write_bytes((ROOT / artwork).read_bytes())
-    bundle = (tmp_path / MAC_DRIVER).parents[2]
-    (bundle / "Contents").mkdir(parents=True)
-    os.utime(bundle, (1, 1))
-    binary = tmp_path / "driver"
-    binary.write_bytes(Path("/usr/bin/true").read_bytes())
-    binary.chmod(0o755)
-
-    contents = native._bundle_macos_driver(tmp_path, binary).parents[1]
-    assert bundle.stat().st_mtime > 1
-    metadata = plistlib.loads((contents / "Info.plist").read_bytes())
-    icon = contents / "Resources" / metadata["CFBundleIconFile"]
-    iconset = tmp_path / "Unpacked.iconset"
-    native.run("/usr/bin/iconutil", ["-c", "iconset", icon, "-o", iconset], capture=True)
-    for name, size in (("icon_16x16.png", 16), ("icon_512x512@2x.png", 1024)):
-        with Image.open(iconset / name) as image:
-            assert image.size == (size, size)
-            assert image.getchannel("A").getextrema() == (0, 255)
 
 
 @pytest.fixture
@@ -87,28 +59,6 @@ def test_platform_wheel_uses_cached_driver_without_compiling(installed, monkeypa
     assert cached.is_relative_to(home)
     assert cached.is_file()
     assert native.build_native() == cached
-
-
-@pytest.mark.parametrize(("prompt", "flag"), [(False, "--check-permissions"), (True, "--request-permissions")])
-def test_macos_permissions_launch_the_app_that_owns_access(tmp_path, monkeypatch, caplog, prompt, flag):
-    monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr(paths, "repository_root", lambda: tmp_path)
-    executable = tmp_path / MAC_DRIVER
-    executable.parent.mkdir(parents=True)
-    executable.touch()
-    status = {"accessibility": True, "screenCapture": False, "input": True, "executable": str(executable)}
-
-    def launch(command, **kwargs):
-        assert command[0] == "/usr/bin/open"
-        assert Path(command[command.index("-a") + 1]) == executable.parents[2].resolve()
-        assert command[-2:] == ["--args", flag]
-        Path(command[command.index("--stdout") + 1]).write_text(json.dumps(status), encoding="utf-8")
-        return subprocess.CompletedProcess(command, 0, stderr="")
-
-    monkeypatch.setattr(subprocess, "run", launch)
-    assert native.permissions(["--request"] if prompt else []) == 1
-    assert "⇧⌘G" in caplog.text
-    assert str(executable.parents[2]) in caplog.text
 
 
 def test_installed_wheel_reports_rust_source_failure(installed, monkeypatch):
