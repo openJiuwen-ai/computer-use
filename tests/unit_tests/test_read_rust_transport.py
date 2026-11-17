@@ -68,7 +68,7 @@ class ReplyConnection(transport.Connection):
     def _invalidate(self):
         self.invalidated = True
 
-    async def _connect(self):
+    async def _connect(self, deadline=None):
         return None
 
     def _write(self, value):

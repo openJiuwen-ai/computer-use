@@ -5,7 +5,6 @@ import argparse
 import json
 import logging
 import os
-import plistlib
 import shlex
 import shutil
 import subprocess
@@ -14,7 +13,6 @@ from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
-from xml.etree import ElementTree
 
 from computer_use.json import loads as jsonLoads
 from computer_use.paths import LINUX_RUNTIME, linux_python, native_driver, repository_root
@@ -34,43 +32,6 @@ def run(command, args, cwd=None, capture=False):
     return result.stdout.strip() if capture else result
 
 
-def _build_macos_icon(cursor: Path, destination: Path):
-    from PIL import Image
-
-    artwork = ElementTree.parse(cursor).getroot()
-    x, y, width, height = map(float, artwork.attrib["viewBox"].split())
-    center_x, center_y = x + width / 2, y + height / 2
-    # Keep the pointer's original halo. Give the arrow enough room to read at 16 pt.
-    first_layer = next(index for index, layer in enumerate(artwork) if layer.get("id") == "body")
-    arrow = ElementTree.Element(
-        "{http://www.w3.org/2000/svg}g",
-        transform=f"translate({center_x} {center_y}) scale(2.35) translate({-center_x} {-center_y})",
-    )
-    arrow.extend(artwork[first_layer:])
-    artwork[first_layer:] = [arrow]
-    artwork.set("width", "1024")
-    artwork.set("height", "1024")
-
-    with TemporaryDirectory(prefix="jiuwen-cua-icon-") as directory:
-        work = Path(directory)
-        source, raster = work / "pointer.svg", work / "pointer.png"
-        ElementTree.ElementTree(artwork).write(source, encoding="utf-8")
-        run("/usr/bin/sips", ["-s", "format", "png", source, "--out", raster], capture=True)
-        iconset = work / "AppIcon.iconset"
-        iconset.mkdir()
-        with Image.open(raster) as image:
-            for points in (16, 32, 128, 256, 512):
-                for scale, suffix in ((1, ""), (2, "@2x")):
-                    pixels = points * scale
-                    image.resize((pixels, pixels), Image.Resampling.LANCZOS).save(
-                        iconset / f"icon_{points}x{points}{suffix}.png"
-                    )
-        icon = work / destination.name
-        run("/usr/bin/iconutil", ["-c", "icns", iconset, "-o", icon], capture=True)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(icon, destination)
-
-
 def build_mac_os(root=None, *, configuration="release"):
     if sys.platform != "darwin":
         raise RuntimeError("Only the macOS backend is implemented.")
@@ -87,28 +48,35 @@ def build_mac_os(root=None, *, configuration="release"):
 
 
 def _bundle_macos_driver(root, binary):
-    bundle = root / "os_adapter/macos/.build/Jiuwen CUA.app"
-    contents = bundle / "Contents"
-    icon = contents / "Resources/AppIcon.icns"
-    _build_macos_icon(root / "os_adapter/assets/agent-pointer/cursor.svg", icon)
-    executable = contents / "MacOS/computer-use-driver"
+    native = root / "os_adapter/macos"
+    bundle = native / ".build/Jiuwen CUA.app"
+    executable = bundle / "Contents/MacOS/computer-use-driver"
     executable.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(binary, executable)
-    bundle_id = "com.openjiuwen.cua"
-    (contents / "Info.plist").write_bytes(plistlib.dumps({
-        "CFBundleIdentifier": bundle_id,
-        "CFBundleName": "Jiuwen CUA",
-        "CFBundleDisplayName": "Jiuwen CUA",
-        "CFBundleExecutable": executable.name,
-        "CFBundleIconFile": icon.name,
-        "CFBundlePackageType": "APPL",
-        "CFBundleVersion": "1",
-        "CFBundleShortVersionString": "0.0.1",
-        "LSMinimumSystemVersion": "14.0",
-        "LSUIElement": True,
-        "NSScreenCaptureUsageDescription": "Jiuwen CUA uses screen recording to show windows and the desktop to your agent.",
-    }))
-    run("codesign", ["--force", "--sign", "-", "--identifier", bundle_id, bundle])
+    resources = bundle / "Contents/Resources"
+    resources.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(native / "Resources/AppIcon.icns", resources)
+    (bundle / "Contents/Info.plist").write_text(
+        """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.openjiuwen.cua</string>
+<key>CFBundleName</key><string>Jiuwen CUA</string>
+<key>CFBundleDisplayName</key><string>Jiuwen CUA</string>
+<key>CFBundleExecutable</key><string>computer-use-driver</string>
+<key>CFBundleIconFile</key><string>AppIcon.icns</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>0.0.1</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>LSUIElement</key><true/>
+<key>NSScreenCaptureUsageDescription</key>
+<string>Jiuwen CUA uses screen recording to show windows and the desktop to your agent.</string>
+</dict></plist>
+""",
+        encoding="utf-8",
+    )
+    run("codesign", ["--force", "--sign", "-", "--identifier", "com.openjiuwen.cua", bundle], native)
     # Launch Services uses the bundle's timestamp, including on in-place builds.
     bundle.touch()
     return executable
@@ -431,8 +399,8 @@ def read_permissions(request=False, root=None, timeout=None, *, protocol_version
         executable = native["command"]
         if not Path(executable).is_file():
             raise RuntimeError("Jiuwen CUA 尚未构建，请先运行 computer-use-build。")
-        bundle = native["app_bundle"]
-        status = _permission_response(read_mac_permissions(bundle, timeout=timeout))
+        bundle = Path(executable).parents[2]
+        status = read_mac_permissions(bundle, timeout=timeout)
         if request and not permission_state(status, "darwin")[0]:
             open_permission_guide(bundle, timeout=timeout)
         return status
@@ -454,16 +422,11 @@ def read_permissions(request=False, root=None, timeout=None, *, protocol_version
         raise RuntimeError("本机后端尚未构建，请先运行 computer-use-build，再运行 computer-use-permissions。") from None
     if result.returncode:
         raise RuntimeError(f"权限检查未完成（{result.returncode}）。")
-    status = _permission_response(result.stdout)
-    if sys.platform == "linux" and protocol_version == 6 and status.get("protocolVersion") != 6:
-        raise ValueError(("Permission response did not check protocol 6 resources; rebuild the Linux driver."))
-    return status
-
-
-def _permission_response(output):
-    status = jsonLoads(output)
+    status = jsonLoads(result.stdout)
     if not isinstance(status, dict):
         raise ValueError("Invalid permission response")
+    if sys.platform == "linux" and protocol_version == 6 and status.get("protocolVersion") != 6:
+        raise ValueError(("Permission response did not check protocol 6 resources; rebuild the Linux driver."))
     return status
 
 

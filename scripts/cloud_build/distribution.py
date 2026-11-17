@@ -59,7 +59,7 @@ def fingerprint(root, target):
     ]
     sources = {
         "linux": ("src", "pyproject.toml", "requirements.lock"),
-        "macos": ("Sources", "Package.swift"),
+        "macos": ("Sources", "Package.swift", "Resources/AppIcon.icns"),
         "windows": ("Sources", "Build", "Workers"),
     }
     source_names = sources.get(system)

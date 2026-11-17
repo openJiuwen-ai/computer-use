@@ -88,7 +88,7 @@ MAC_INFO = f"{MAC_BUNDLE}/Contents/Info.plist"
 
 def payload_allowed(name, target):
     if target.startswith("macos-"):
-        return name.startswith(f"{MAC_BUNDLE}/Contents/")
+        return name.startswith(f"{MAC_BUNDLE}/")
     if target.startswith("windows-"):
         return name in {
             "os_adapter/windows/.build/computer-use-driver.exe",
@@ -150,14 +150,19 @@ def inspect_archive(path, *, root=None, target=None):
                 raise ValueError(f"Invalid backend artifact file: {name}")
             if details["mode"] not in (0o644, 0o755) or sha256(archive.read(name)) != details["sha256"]:
                 raise ValueError(f"Invalid backend artifact file: {name}")
-        files = manifest["files"]
-        system = TARGETS[actual_target][0]
-        if not files or (system == "win32" and "os_adapter/windows/.build/computer-use-driver.exe" not in files):
+        required = {
+            "darwin": MAC_DRIVER,
+            "win32": "os_adapter/windows/.build/computer-use-driver.exe",
+        }.get(TARGETS[actual_target][0])
+        if not manifest["files"] or (required and required not in manifest["files"]):
             raise ValueError("Backend artifact has no driver.")
-        if system == "win32" and len(files) != 3:
+        if actual_target.startswith("windows-") and len(manifest["files"]) != 3:
             raise ValueError("Windows backend requires driver, capture helper and UIA interop DLL.")
-        if system == "darwin" and (MAC_INFO not in files or files.get(MAC_DRIVER, {}).get("mode") != 0o755):
-            raise ValueError("macOS backend requires an application bundle with an executable driver.")
+        if required and actual_target.startswith("macos-"):
+            if MAC_INFO not in manifest["files"]:
+                raise ValueError("macOS backend requires an application bundle with an executable driver.")
+            if manifest["files"][required]["mode"] != 0o755:
+                raise ValueError("macOS driver must be executable.")
         return manifest
 
 

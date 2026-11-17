@@ -21,6 +21,8 @@ def _launch(bundle):
 
 def read_permissions(bundle, *, timeout):
     """Run the permission command under the same identity as the SDK driver."""
+    from computer_use.json import loads
+
     with TemporaryDirectory(prefix="jiuwen-cua-permissions-") as directory:
         output = Path(directory) / "status.json"
         result = subprocess.run(
@@ -33,7 +35,10 @@ def read_permissions(bundle, *, timeout):
         )
         if result.returncode or not output.is_file():
             raise RuntimeError(result.stderr.strip() or f"Jiuwen CUA permission check failed ({result.returncode}).")
-        return output.read_text(encoding="utf-8")
+        status = loads(output.read_bytes())
+        if not isinstance(status, dict):
+            raise TypeError("Invalid Jiuwen CUA permission response")
+        return status
 
 
 def open_permission_guide(bundle, *, timeout):

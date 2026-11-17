@@ -21,7 +21,6 @@ from computer_use.errors import ComputerUseError
 from computer_use.native import desktop_probe
 from computer_use.native.connection import Connection
 from computer_use_native_tools import native
-from PIL import Image
 
 MAC_DRIVER = "os_adapter/macos/.build/Jiuwen CUA.app/Contents/MacOS/computer-use-driver"
 MAC_TAG = "macosx_14_0_arm64"
@@ -34,10 +33,9 @@ COMMIT = "a" * 40
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Renders the bundle icon with macOS tools.")
 def test_macos_bundle_embeds_the_pointer_icon(tmp_path):
-    artwork = Path("os_adapter/assets/agent-pointer/cursor.svg")
-    cursor = tmp_path / artwork
-    cursor.parent.mkdir(parents=True)
-    cursor.write_bytes((ROOT / artwork).read_bytes())
+    asset = Path("os_adapter/macos/Resources/AppIcon.icns")
+    (tmp_path / asset).parent.mkdir(parents=True)
+    (tmp_path / asset).write_bytes((ROOT / asset).read_bytes())
     bundle = (tmp_path / MAC_DRIVER).parents[2]
     (bundle / "Contents").mkdir(parents=True)
     os.utime(bundle, (1, 1))
@@ -49,12 +47,8 @@ def test_macos_bundle_embeds_the_pointer_icon(tmp_path):
     assert bundle.stat().st_mtime > 1
     metadata = plistlib.loads((contents / "Info.plist").read_bytes())
     icon = contents / "Resources" / metadata["CFBundleIconFile"]
-    iconset = tmp_path / "Unpacked.iconset"
-    native.run("/usr/bin/iconutil", ["-c", "iconset", icon, "-o", iconset], capture=True)
-    for name, size in (("icon_16x16.png", 16), ("icon_512x512@2x.png", 1024)):
-        with Image.open(iconset / name) as image:
-            assert image.size == (size, size)
-            assert image.getchannel("A").getextrema() == (0, 255)
+    assert metadata["CFBundleIdentifier"] == "com.openjiuwen.cua"
+    assert icon.read_bytes() == (ROOT / asset).read_bytes()
 
 
 @pytest.fixture

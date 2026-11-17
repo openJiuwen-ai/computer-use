@@ -25,9 +25,4 @@ enum DesktopPermission: String, CaseIterable {
             PermissionGuide.open(startingAt: self)
         }
     }
-
-    var settingsHelp: String {
-        let section = self == .screenCapture ? "Screen & System Audio Recording" : "Accessibility"
-        return "Enable Jiuwen CUA in System Settings > Privacy & Security > \(section)."
-    }
 }

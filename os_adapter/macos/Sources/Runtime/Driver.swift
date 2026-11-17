@@ -1,6 +1,8 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import AppKit
+import ApplicationServices
+import CoreGraphics
 
 @MainActor final class Driver {
     private let session = UUID().uuidString
@@ -25,8 +27,8 @@ import AppKit
 
     static func permissionStatus() -> [String: Any] {
         return [
-            "accessibility": DesktopPermission.accessibility.granted, "screenCapture": DesktopPermission.screenCapture.granted,
-            "input": DesktopPermission.postEvents.granted, "executable": Bundle.main.executablePath ?? CommandLine.arguments[0]
+            "accessibility": AXIsProcessTrusted(), "screenCapture": CGPreflightScreenCaptureAccess(),
+            "input": CGPreflightPostEventAccess(), "executable": Bundle.main.executablePath ?? CommandLine.arguments[0]
         ]
     }
 

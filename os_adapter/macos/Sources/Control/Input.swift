@@ -100,9 +100,11 @@ import Carbon
     }
 
     static func source() throws -> CGEventSource {
-        guard DesktopPermission.postEvents.granted else {
+        guard CGPreflightPostEventAccess() else {
             DesktopPermission.postEvents.guideOnce()
-            throw DriverError(DesktopPermission.postEvents.settingsHelp, code: .desktopUnavailable)
+            throw DriverError(
+                "accessibility permission denied; enable Jiuwen CUA in System Settings > Privacy & Security",
+                code: .desktopUnavailable)
         }
         guard let source = CGEventSource(stateID: .privateState) else {
             throw DriverError("cannot create input source")

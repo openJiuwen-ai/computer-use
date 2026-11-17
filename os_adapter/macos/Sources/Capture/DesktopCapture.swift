@@ -166,7 +166,7 @@ import CoreGraphics
         let beforeWindows =
             CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]]
-        let permission = DesktopPermission.screenCapture.granted
+        let permission = CGPreflightScreenCaptureAccess()
         var failures = [CGDirectDisplayID: String](), captured = Set<CGDirectDisplayID>()
         var screenshot: CapturedImage?
         let interval = CaptureInterval()
@@ -242,7 +242,7 @@ import CoreGraphics
             }
         } else {
             DesktopPermission.screenCapture.guideOnce()
-            for display in geometry.displays { failures[display.id] = DesktopPermission.screenCapture.settingsHelp }
+            for display in geometry.displays { failures[display.id] = "screen recording permission denied" }
         }
         try RequestDiagnostics.checkCancellation()
         try BackgroundTarget.validateDesktop()

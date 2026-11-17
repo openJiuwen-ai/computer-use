@@ -25,9 +25,9 @@ import ApplicationServices
             throw DriverError("target process changed", code: .staleTarget)
         }
         try BackgroundTarget(target.application).validate(input: true)
-        guard DesktopPermission.accessibility.granted else {
+        guard AXIsProcessTrusted() else {
             DesktopPermission.accessibility.guideOnce()
-            throw DriverError(DesktopPermission.accessibility.settingsHelp, code: .desktopUnavailable)
+            throw DriverError("accessibility permission denied", code: .desktopUnavailable)
         }
         try inspection.validateTargetIdentity(target)
         return target

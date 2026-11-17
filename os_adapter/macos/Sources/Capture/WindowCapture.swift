@@ -61,11 +61,11 @@ import ApplicationServices
         do {
             let metric = RequestDiagnostics.metrics?.start(.capturePermissionPreflight)
             defer { metric?.end() }
-            permitted = DesktopPermission.screenCapture.granted
+            permitted = CGPreflightScreenCaptureAccess()
         }
         guard permitted else {
             DesktopPermission.screenCapture.guideOnce()
-            throw DriverError(DesktopPermission.screenCapture.settingsHelp, code: .desktopUnavailable)
+            throw DriverError("screen recording permission denied", code: .desktopUnavailable)
         }
         let application: BackgroundTarget
         let retainedTarget: AXUIElement?

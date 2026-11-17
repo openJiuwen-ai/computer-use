@@ -103,6 +103,7 @@ DIRECTORIES = (
 )
 FILES = (
     "os_adapter/macos/Package.swift",
+    "os_adapter/macos/Resources/AppIcon.icns",
     "os_adapter/linux/pyproject.toml",
     "os_adapter/linux/requirements.lock",
 )

@@ -243,8 +243,7 @@ def native_driver(platform=None, root=None):
                 return {"command": str(bundled), "args": []}
     root = Path(root) if root is not None else repository_root()
     if platform == "darwin":
-        executable = root / _MACOS_DRIVER
-        return {"command": str(executable), "args": [], "app_bundle": str(executable.parents[2])}
+        return dict(command=str(root / _MACOS_DRIVER), args=[])
     if platform == "linux":
         if (root / LINUX_RUNTIME / "__main__.py").is_file():
             # CPython adds the entry directory itself to the import path, including with -I.

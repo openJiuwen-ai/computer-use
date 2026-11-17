@@ -159,7 +159,7 @@ class Connection:
         task.add_done_callback(self._readers.discard)
         return task
 
-    async def _connect(self):
+    async def _connect(self, deadline=None):
         self._check_retained_session()
         if self._child is not None:
             return
@@ -192,11 +192,17 @@ class Connection:
         self._buffer, self._diagnostic, self._next_id = bytearray(), "", 1
         self._traces = {}
         lifetime = 4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1
-        if sys.platform == "darwin" and (bundle := driver.get("app_bundle")) is not None:
+        if self.driver is None and sys.platform == "darwin" and (executable := Path(command)).match(
+            "*.app/Contents/MacOS/*"
+        ):
             from computer_use.native.macos_app import start_app
 
             provenance = startup_provenance(command)
-            self._child = await start_app(bundle, lifetime_fd=lifetime)
+            try:
+                async with asyncio.timeout_at(deadline / 1000 if deadline is not None else None):
+                    self._child = await start_app(executable.parents[2], lifetime_fd=lifetime)
+            except TimeoutError as error:
+                raise local_failure("Jiuwen CUA launch timed out", "execution_failed", "connection") from error
             self._child_uses_eof = True
             self._track_child(self._child, command, provenance)
             return
@@ -475,11 +481,8 @@ class Connection:
         # an unrelated successor that another scope has already established.
         self._check_retained_session()
         try:
-            try:
-                async with asyncio.timeout(remaining() / 1000):
-                    await self._connect()
-            except TimeoutError as error:
-                raise local_failure("native driver launch timed out", "execution_failed", "connection") from error
+            remaining()
+            await self._connect(deadline)
             await self._negotiate(remaining())
         except asyncio.CancelledError:
             self.close(RuntimeError("connection request cancelled before dispatch"))
