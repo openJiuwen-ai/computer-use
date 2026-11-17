@@ -94,17 +94,19 @@ struct PermissionGuideOrder {
 
     private func makePanel() -> NSPanel {
         sections.selectedSegment = startingAt == .screenCapture ? 1 : 0
-        let instruction = NSTextField(wrappingLabelWithString: guideText(
-            "Turn on Jiuwen CUA in System Settings. If it’s missing from the list, drag it in.",
-            "在系统设置列表里开启 Jiuwen CUA。如果列表里没有它，请将下方应用拖入列表。"))
-        instruction.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        sections.segmentStyle = .rounded
+        sections.controlSize = .small
+        let instruction = NSTextField(labelWithString: guideText(
+            "Turn on above. Drag in if missing.", "在上方开启，缺少时拖入"))
+        instruction.font = .systemFont(ofSize: 12, weight: .medium)
         let arrow = NSImageView()
         arrow.image = NSImage(systemSymbolName: "arrow.up", accessibilityDescription: nil)
         arrow.contentTintColor = .controlAccentColor
-        arrow.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 18, weight: .semibold)
+        arrow.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        arrow.setAccessibilityElement(false)
         let directions = NSStackView(views: [arrow, instruction])
         directions.alignment = .centerY
-        directions.spacing = 10
+        directions.spacing = 6
 
         let appRow = PermissionAppRow(bundle: bundle) { [weak self] dragging in
             self?.dragging = dragging
@@ -114,8 +116,16 @@ struct PermissionGuideOrder {
                 self?.followSettings()
             }
         }
-        let copyPath = NSButton(title: guideText("Copy App Path", "复制应用路径"),
-                                target: self, action: #selector(copyAppPath(_:)))
+        let copyTitle = guideText("Copy App Path", "复制应用路径")
+        let copyPath = NSButton(
+            image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: copyTitle) ?? NSImage(),
+            target: self, action: #selector(copyAppPath(_:)))
+        copyPath.isBordered = false
+        copyPath.toolTip = guideText(
+            "Copy the app path and close this guide. Click + in System Settings, press ⇧⌘G, and paste the path.",
+            "复制应用路径后关闭引导。点系统设置中的「＋」，按 ⇧⌘G 并粘贴路径。")
+        copyPath.setAccessibilityLabel(copyTitle)
+        copyPath.setAccessibilityHelp(copyPath.toolTip)
         let closeTitle = guideText("Close Permission Guide", "关闭授权引导")
         let close = NSButton(
             image: NSImage(systemSymbolName: "xmark.circle", accessibilityDescription: closeTitle) ?? NSImage(),
@@ -123,19 +133,31 @@ struct PermissionGuideOrder {
         close.isBordered = false
         close.toolTip = closeTitle
         close.setAccessibilityLabel(closeTitle)
-        let actions = NSStackView(views: [sections, copyPath, close])
-        let hint = NSTextField(wrappingLabelWithString: guideText(
-            "If dragging is unavailable, copy the path and close this guide. Click + and paste it with ⇧⌘G.",
-            "若无法拖入，复制应用路径后关闭引导，点「＋」再按 ⇧⌘G 粘贴。"))
-        hint.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        hint.textColor = .secondaryLabelColor
-        let layout = NSStackView(views: [directions, appRow, actions, hint])
-        layout.orientation = .vertical
-        layout.alignment = .leading
+        let sectionsDivider = NSBox()
+        let actionsDivider = NSBox()
+        for divider in [sectionsDivider, actionsDivider] {
+            divider.boxType = .separator
+            divider.widthAnchor.constraint(equalToConstant: 1).isActive = true
+            divider.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        }
+        let layout = NSStackView(views: [
+            appRow, directions, sectionsDivider, sections, actionsDivider, copyPath, close,
+        ])
+        layout.alignment = .centerY
         layout.spacing = 10
+        layout.setCustomSpacing(6, after: copyPath)
         layout.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            appRow.widthAnchor.constraint(equalToConstant: 156),
+            appRow.heightAnchor.constraint(equalToConstant: 30),
+            copyPath.widthAnchor.constraint(equalToConstant: 24),
+            copyPath.heightAnchor.constraint(equalToConstant: 24),
+            close.widthAnchor.constraint(equalToConstant: 24),
+            close.heightAnchor.constraint(equalToConstant: 24),
+        ])
 
-        let panel = PermissionGuidePanel(contentRect: NSRect(x: 0, y: 0, width: 456, height: 162),
+        let width = ceil(layout.fittingSize.width) + 20
+        let panel = PermissionGuidePanel(contentRect: NSRect(x: 0, y: 0, width: width, height: 46),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "Jiuwen CUA"
         panel.delegate = self
@@ -151,18 +173,14 @@ struct PermissionGuideOrder {
         content.blendingMode = .behindWindow
         content.state = .active
         content.wantsLayer = true
-        content.layer?.cornerRadius = 16
+        content.layer?.cornerRadius = 10
         content.layer?.masksToBounds = true
         panel.contentView = content
         content.addSubview(layout)
         NSLayoutConstraint.activate([
-            layout.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 18),
-            layout.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
+            layout.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+            layout.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
             layout.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-            directions.widthAnchor.constraint(equalTo: layout.widthAnchor),
-            appRow.widthAnchor.constraint(equalTo: layout.widthAnchor),
-            appRow.heightAnchor.constraint(equalToConstant: 48),
-            hint.widthAnchor.constraint(equalTo: layout.widthAnchor),
         ])
         return panel
     }
@@ -256,7 +274,9 @@ struct PermissionGuideOrder {
     @objc private func copyAppPath(_ sender: NSButton) {
         NSPasteboard.general.clearContents()
         if NSPasteboard.general.setString(bundle.path, forType: .string) {
-            sender.title = guideText("Path Copied", "已复制路径")
+            let copied = guideText("Path Copied", "已复制路径")
+            sender.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: copied)
+            sender.setAccessibilityLabel(copied)
         }
     }
 }
@@ -278,23 +298,30 @@ private final class PermissionAppRow: NSView, NSDraggingSource {
         super.init(frame: .zero)
         let iconView = NSImageView(image: icon)
         let label = NSTextField(labelWithString: bundle.lastPathComponent)
-        label.font = .systemFont(ofSize: 13, weight: .medium)
-        let row = NSStackView(views: [iconView, label])
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.lineBreakMode = .byTruncatingMiddle
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let grip = NSImageView()
+        grip.image = NSImage(systemSymbolName: "circle.grid.2x2.fill", accessibilityDescription: nil)
+        grip.contentTintColor = .tertiaryLabelColor
+        grip.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 10, weight: .medium)
+        grip.setAccessibilityElement(false)
+        let row = NSStackView(views: [iconView, label, grip])
         row.alignment = .centerY
-        row.spacing = 10
+        row.spacing = 7
 
         let background = NSBox()
         background.boxType = .custom
         background.titlePosition = .noTitle
         background.borderWidth = 0
         background.fillColor = .controlBackgroundColor
-        background.cornerRadius = 8
-        background.contentViewMargins = NSSize(width: 10, height: 8)
+        background.cornerRadius = 6
+        background.contentViewMargins = NSSize(width: 6, height: 4)
         background.contentView = row
         background.autoresizingMask = [.width, .height]
         addSubview(background)
         NSLayoutConstraint.activate([
-            iconView.widthAnchor.constraint(equalToConstant: 32), iconView.heightAnchor.constraint(equalToConstant: 32),
+            iconView.widthAnchor.constraint(equalToConstant: 22), iconView.heightAnchor.constraint(equalToConstant: 22),
         ])
         setAccessibilityLabel(bundle.lastPathComponent)
         setAccessibilityHelp(guideText("Drag this app into System Settings.", "将此应用拖入系统设置列表。"))
