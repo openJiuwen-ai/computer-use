@@ -171,7 +171,8 @@ class Connection:
             )
         driver = self.driver if self.driver is not None else native_driver()
         command = driver["command"]
-        if self.driver is None and not Path(command).exists():
+        default_path = Path(command) if self.driver is None else None
+        if default_path is not None and not default_path.exists():
             reason = installed_backend_unavailable_reason()
             if reason == "unsupported_platform":
                 raise local_failure(
@@ -192,15 +193,13 @@ class Connection:
         self._buffer, self._diagnostic, self._next_id = bytearray(), "", 1
         self._traces = {}
         lifetime = 4 if os.environ.get("COMPUTER_USE_LIFETIME_FD") == "4" else -1
-        if self.driver is None and sys.platform == "darwin" and (executable := Path(command)).match(
-            "*.app/Contents/MacOS/*"
-        ):
+        if sys.platform == "darwin" and default_path is not None and default_path.match("*.app/Contents/MacOS/*"):
             from computer_use.native.macos_app import start_app
 
             provenance = startup_provenance(command)
             try:
                 async with asyncio.timeout_at(deadline / 1000 if deadline is not None else None):
-                    self._child = await start_app(executable.parents[2], lifetime_fd=lifetime)
+                    self._child = await start_app(default_path.parents[2], lifetime_fd=lifetime)
             except TimeoutError as error:
                 raise local_failure("Jiuwen CUA launch timed out", "execution_failed", "connection") from error
             self._child_uses_eof = True

@@ -9,7 +9,7 @@ import socket
 import subprocess
 from contextlib import ExitStack, suppress
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import TemporaryDirectory, TemporaryFile
 
 # Darwin <sys/un.h>. Python does not expose LOCAL_PEERPID on all versions.
 _SOL_LOCAL, _LOCAL_PEERPID = 0, 2
@@ -51,7 +51,8 @@ def open_permission_guide(bundle, *, timeout):
         check=False,
     )
     if result.returncode:
-        raise RuntimeError(result.stderr.strip() or f"Jiuwen CUA permission guide failed to open ({result.returncode}).")
+        detail = result.stderr.strip() or f"Jiuwen CUA permission guide failed to open ({result.returncode})."
+        raise RuntimeError(detail)
 
 
 def _pipe(read_owner, write_owner):
@@ -95,6 +96,7 @@ async def start_app(bundle, *, lifetime_fd):
     # on a short path independent of the installation and TMPDIR.
     with (
         TemporaryDirectory(prefix="jiuwen-cua-", dir="/tmp") as directory,
+        TemporaryFile() as launch_log,
         socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener,
         ExitStack() as host,
         ExitStack() as app,
@@ -115,14 +117,15 @@ async def start_app(bundle, *, lifetime_fd):
             "-W", "--args", "--connect-stdio", endpoint,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=launch_log,
         )
         accepted = asyncio.create_task(loop.sock_accept(listener))
         exited = asyncio.create_task(launcher.wait())
         try:
             await asyncio.wait((accepted, exited), return_when=asyncio.FIRST_COMPLETED)
             if not accepted.done():
-                detail = (await launcher.stderr.read()).decode(errors="replace").strip()
+                launch_log.seek(0)
+                detail = launch_log.read().decode(errors="replace").strip()
                 raise RuntimeError(detail or "Jiuwen CUA exited before connecting to the SDK.")
             peer, _ = accepted.result()
             pid = peer.getsockopt(_SOL_LOCAL, _LOCAL_PEERPID)
@@ -137,10 +140,13 @@ async def start_app(bundle, *, lifetime_fd):
             if launcher.returncode is None:
                 with suppress(ProcessLookupError):
                     launcher.kill()
+            await launcher.wait()
             raise
         finally:
+            accepted.cancel()
             exited.cancel()
-            if not accepted.cancel() and not accepted.cancelled() and accepted.exception() is None:
-                accepted.result()[0].close()
+            connection, _ = await asyncio.gather(accepted, exited, return_exceptions=True)
+            if isinstance(connection, tuple):
+                connection[0].close()
         host.pop_all()  # The asyncio transports now own their end of each pipe.
         return MacAppProcess(launcher, pid, stdin, stdout, stderr)
