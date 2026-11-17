@@ -1,14 +1,13 @@
 // Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
-@preconcurrency import ApplicationServices
+import ApplicationServices
 import CoreGraphics
 import Foundation
 
-enum DesktopPermission: CaseIterable {
+enum DesktopPermission: String, CaseIterable {
     case accessibility, screenCapture, postEvents
 
-    // Permission attribution depends on the host. Track prompts only for this driver process.
-    @MainActor private static var prompted = Set<Self>()
+    @MainActor private static var guideStarted = false
 
     var granted: Bool {
         switch self {
@@ -19,24 +18,16 @@ enum DesktopPermission: CaseIterable {
     }
 
     @MainActor func guideOnce() {
-        guard !Self.prompted.contains(self) else { return }
-        // Return the operation's existing result while macOS handles the request.
+        guard !Self.guideStarted else { return }
         DispatchQueue.main.async {
-            guard !Self.prompted.contains(self), !granted else { return }
-            Self.prompted.insert(self)
-            request()
+            guard !Self.guideStarted, !granted else { return }
+            Self.guideStarted = true
+            PermissionGuide.open(startingAt: self)
         }
     }
 
-    @MainActor func request() {
-        switch self {
-        case .accessibility:
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-        case .screenCapture:
-            _ = CGRequestScreenCaptureAccess()
-        case .postEvents:
-            _ = CGRequestPostEventAccess()
-        }
+    var settingsHelp: String {
+        let section = self == .screenCapture ? "Screen & System Audio Recording" : "Accessibility"
+        return "Enable Jiuwen CUA in System Settings > Privacy & Security > \(section)."
     }
 }

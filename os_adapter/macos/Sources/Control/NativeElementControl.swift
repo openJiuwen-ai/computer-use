@@ -27,7 +27,7 @@ import ApplicationServices
         try BackgroundTarget(target.application).validate(input: true)
         guard DesktopPermission.accessibility.granted else {
             DesktopPermission.accessibility.guideOnce()
-            throw DriverError("accessibility permission denied", code: .desktopUnavailable)
+            throw DriverError(DesktopPermission.accessibility.settingsHelp, code: .desktopUnavailable)
         }
         try inspection.validateTargetIdentity(target)
         return target

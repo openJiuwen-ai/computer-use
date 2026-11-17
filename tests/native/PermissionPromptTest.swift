@@ -29,21 +29,30 @@ func CGRequestPostEventAccess() -> Bool {
     return false
 }
 
+@MainActor enum PermissionGuide {
+    static private(set) var opened = [DesktopPermission]()
+
+    static func open(startingAt permission: DesktopPermission) {
+        opened.append(permission)
+    }
+}
+
 @main struct PermissionPromptTest {
     @MainActor static func main() async {
-        DesktopPermission.accessibility.guideOnce()
-        DesktopPermission.accessibility.guideOnce()
-        DesktopPermission.postEvents.guideOnce()
         DesktopPermission.screenCapture.guideOnce()
-        precondition(requests.isEmpty, "permission requests must be deferred")
         await drainMainQueue()
-        precondition(requests == ["accessibility", "postEvents"], "first missing permissions should each prompt once")
+        precondition(PermissionGuide.opened.isEmpty, "granted access should leave the desktop alone")
 
         screenCaptureGranted = false
+        let first: DesktopPermission = CommandLine.arguments.contains("--accessibility") ? .postEvents : .screenCapture
+        first.guideOnce()
+        first.guideOnce()
         DesktopPermission.screenCapture.guideOnce()
-        DesktopPermission.screenCapture.guideOnce()
+        DesktopPermission.accessibility.guideOnce()
+        precondition(PermissionGuide.opened.isEmpty, "opening the guide must be deferred")
         await drainMainQueue()
-        precondition(requests == ["accessibility", "postEvents", "screenCapture"], "a new permission gap should prompt")
+        precondition(PermissionGuide.opened == [first], "show one guide starting at the first missing permission")
+        precondition(requests.isEmpty, "the guide should let the user open System Settings")
     }
 
     private static func drainMainQueue() async {

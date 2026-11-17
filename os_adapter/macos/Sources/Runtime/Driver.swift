@@ -23,12 +23,7 @@ import AppKit
         }
     }
 
-    static func permissionStatus(request: Bool = false) -> [String: Any] {
-        if request {
-            for permission in DesktopPermission.allCases where !permission.granted {
-                permission.request()
-            }
-        }
+    static func permissionStatus() -> [String: Any] {
         return [
             "accessibility": DesktopPermission.accessibility.granted, "screenCapture": DesktopPermission.screenCapture.granted,
             "input": DesktopPermission.postEvents.granted, "executable": Bundle.main.executablePath ?? CommandLine.arguments[0]

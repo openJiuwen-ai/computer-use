@@ -81,9 +81,14 @@ def artifact_name(root, target):
     return f"backend-{target}-{fingerprint(root, target)}"
 
 
+MAC_BUNDLE = "os_adapter/macos/.build/Jiuwen CUA.app"
+MAC_DRIVER = f"{MAC_BUNDLE}/Contents/MacOS/computer-use-driver"
+MAC_INFO = f"{MAC_BUNDLE}/Contents/Info.plist"
+
+
 def payload_allowed(name, target):
     if target.startswith("macos-"):
-        return name.startswith("os_adapter/macos/.build/ComputerUseDriver.app/")
+        return name.startswith(f"{MAC_BUNDLE}/Contents/")
     if target.startswith("windows-"):
         return name in {
             "os_adapter/windows/.build/computer-use-driver.exe",
@@ -145,16 +150,14 @@ def inspect_archive(path, *, root=None, target=None):
                 raise ValueError(f"Invalid backend artifact file: {name}")
             if details["mode"] not in (0o644, 0o755) or sha256(archive.read(name)) != details["sha256"]:
                 raise ValueError(f"Invalid backend artifact file: {name}")
-        required = {
-            "darwin": "os_adapter/macos/.build/ComputerUseDriver.app/Contents/MacOS/computer-use-driver",
-            "win32": "os_adapter/windows/.build/computer-use-driver.exe",
-        }.get(TARGETS[actual_target][0])
-        if not manifest["files"] or (required and required not in manifest["files"]):
+        files = manifest["files"]
+        system = TARGETS[actual_target][0]
+        if not files or (system == "win32" and "os_adapter/windows/.build/computer-use-driver.exe" not in files):
             raise ValueError("Backend artifact has no driver.")
-        if actual_target.startswith("windows-") and len(manifest["files"]) != 3:
+        if system == "win32" and len(files) != 3:
             raise ValueError("Windows backend requires driver, capture helper and UIA interop DLL.")
-        if required and actual_target.startswith("macos-") and manifest["files"][required]["mode"] != 0o755:
-            raise ValueError("macOS driver must be executable.")
+        if system == "darwin" and (MAC_INFO not in files or files.get(MAC_DRIVER, {}).get("mode") != 0o755):
+            raise ValueError("macOS backend requires an application bundle with an executable driver.")
         return manifest
 
 

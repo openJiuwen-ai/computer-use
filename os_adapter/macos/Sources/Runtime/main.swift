@@ -8,6 +8,23 @@ import Darwin
 // context. It only invokes one public running-process activation and exits.
 if let status = ForegroundActivation.runIfRequested(CommandLine.arguments) { exit(status) }
 
+let arguments = Array(CommandLine.arguments.dropFirst())
+if arguments.first == "--permission-guide"
+    || (arguments.isEmpty && Bundle.main.bundleURL.pathExtension == "app")
+{
+    PermissionGuide.run(arguments: arguments)
+    exit(0)
+}
+
+if let index = arguments.firstIndex(of: "--connect-stdio") {
+    guard index + 1 < arguments.count else { exit(1) }
+    do { try AppConnection.attach(arguments[index + 1]) }
+    catch {
+        diagnose("driver connection: \(error)")
+        exit(1)
+    }
+}
+
 let app = NSApplication.shared
 // AppKit may activate an accessory app while finishing launch if its first
 // request already created a window. Keep launch prohibited, then enable the
@@ -16,9 +33,9 @@ app.setActivationPolicy(.prohibited)
 // Closed output pipes must not terminate us before input cleanup can unwind.
 signal(SIGPIPE, SIG_IGN)
 
-if CommandLine.arguments.contains("--check-permissions") || CommandLine.arguments.contains("--request-permissions") {
+if arguments.contains("--check-permissions") {
     do {
-        try writeJSON(Driver.permissionStatus(request: CommandLine.arguments.contains("--request-permissions")))
+        try writeJSON(Driver.permissionStatus())
     } catch { exit(1) }
     exit(0)
 }

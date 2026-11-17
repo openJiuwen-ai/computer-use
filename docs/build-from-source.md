@@ -10,7 +10,7 @@
 
 | 目标系统 | 源码构建依赖 | 桌面运行条件 |
 | --- | --- | --- |
-| macOS 14+，Apple 芯片或 Intel | 带 Swift 6 或更高版本、macOS SDK、链接器和 `codesign` 的 [Xcode 或命令行工具](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools)。 | 登录图形桌面。运行 SDK 或驱动的宿主需要辅助功能权限，截图还需要屏幕录制权限。 |
+| macOS 14+，Apple 芯片或 Intel | 带 Swift 6 或更高版本、macOS SDK、链接器和 `codesign` 的 [Xcode 或命令行工具](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools)。 | 登录图形桌面。为 **Jiuwen CUA** 开启辅助功能和屏幕录制。 |
 | Windows 10 1903+ 或 Windows 11，x64 | [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio) 的「使用 C++ 的桌面开发」工作负载（x64 MSVC 工具和 Windows SDK），以及 .NET Framework 自带的 64 位 `csc.exe`。 | 登录可交互的桌面会话，需要 [.NET Framework 4.8 或 4.8.1](https://learn.microsoft.com/en-us/dotnet/framework/get-started/system-requirements)。 |
 | glibc Linux，x86_64 或 ARM64 | 系统 C 编译器和链接器。驱动使用发行版的 CPython 和 PyGObject，见下文。 | AT-SPI 2、图形会话的 D-Bus、X11 和 xkbcommon 库。截图和模拟键鼠输入需要 X11 会话。Wayland 下可使用应用公开的无障碍树和无障碍动作。 |
 
@@ -84,7 +84,9 @@ uv venv --python 3.12
 
 ## 4. 检查桌面权限并验证 SDK
 
-在已登录、解锁的目标桌面中打开终端，进入第 3 步的运行目录，检查权限。Windows 需要交互桌面会话，Linux 需要继承同一图形会话的显示和 D-Bus 环境。macOS 如缺少权限，运行第二条命令请求授权，在「系统设置 → 隐私与安全」中批准后重新检查。若最终从另一个宿主启动 MCP 或 SDK，也要给实际运行的宿主授权。
+在已登录、解锁的目标桌面中打开终端，进入第 3 步的运行目录，检查权限。Windows 需要交互桌面会话，Linux 需要继承同一图形会话的显示和 D-Bus 环境。
+
+macOS 首次用到缺失的权限时会打开对应的系统设置页，并在窗口底部显示 **Jiuwen CUA** 授权引导。也可以运行第二条命令打开引导。如果列表里已有 **Jiuwen CUA**，直接打开开关。如果列表里找不到它，将引导里的 App 拖入列表再打开开关。若无法拖入，点「复制应用路径」并关闭引导，然后在系统设置里点「＋」，按 ⇧⌘G 粘贴路径并打开。如果 macOS 提示退出并重新打开 App，请按系统提示操作，然后重新检查权限。
 
 ```sh
 uv run --no-project --python .venv computer-use-permissions
@@ -93,6 +95,8 @@ uv run --no-project --python .venv computer-use-permissions
 ```sh
 uv run --no-project --python .venv computer-use-permissions --request
 ```
+
+源码构建使用临时签名。若重建后权限检查仍提示未授权，请在系统设置中为当前构建的 **Jiuwen CUA** 重新授权。
 
 打开一个有窗口的应用，例如计算器。第一条命令列出正在运行的应用，第二条把 `APP_NAME` 换成列表中的应用名。输出应包含这个窗口的实际控件或文字。
 

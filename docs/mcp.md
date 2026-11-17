@@ -25,8 +25,6 @@ uv run --python 3.12 --no-sync computer-use-build
 uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-macOS 可运行 `uv run --python 3.12 --no-sync computer-use-permissions --request` 请求缺失权限，在**系统设置 → 隐私与安全**中批准后重新检查。请使用与启动 SDK 或其 MCP 接入层相同的终端或宿主连接执行这些命令。
-
 ## 3. 接入自己的 Agent
 
 完成上述源码安装、平台依赖准备和后端构建后，即可把 MCP 服务接入自己的 Agent。

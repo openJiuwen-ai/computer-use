@@ -20,7 +20,7 @@ TARGETS = tuple(WHEEL_PLATFORMS)
 PLATFORMS = dict(zip((("darwin", "arm64"), ("win32", "x86_64"), ("linux", "x86_64")), TARGETS))
 FORMAT = 1
 
-MAC_BUNDLE = "os_adapter/macos/.build/ComputerUseDriver.app"
+MAC_BUNDLE = "os_adapter/macos/.build/Jiuwen CUA.app"
 MAC_DRIVER = f"{MAC_BUNDLE}/Contents/MacOS/computer-use-driver"
 WINDOWS_FILES = {
     f"os_adapter/windows/.build/{name}"

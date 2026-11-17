@@ -65,7 +65,7 @@ import ApplicationServices
         }
         guard permitted else {
             DesktopPermission.screenCapture.guideOnce()
-            throw DriverError("screen recording permission denied", code: .desktopUnavailable)
+            throw DriverError(DesktopPermission.screenCapture.settingsHelp, code: .desktopUnavailable)
         }
         let application: BackgroundTarget
         let retainedTarget: AXUIElement?

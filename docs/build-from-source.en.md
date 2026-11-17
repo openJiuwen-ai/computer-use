@@ -10,7 +10,7 @@ Install Git, [uv](https://docs.astral.sh/uv/getting-started/installation/), and 
 
 | Target | Build dependencies | Desktop runtime |
 | --- | --- | --- |
-| macOS 14+, Apple silicon or Intel | [Xcode or Command Line Tools](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) with Swift 6 or later, the macOS SDK, the linker, and `codesign`. | A logged-in desktop session. Grant Accessibility access to the host running the SDK or driver, and Screen Recording access for screenshots. |
+| macOS 14+, Apple silicon or Intel | [Xcode or Command Line Tools](https://developer.apple.com/documentation/xcode/installing-the-command-line-tools) with Swift 6 or later, the macOS SDK, the linker, and `codesign`. | A logged-in desktop session. Grant **Jiuwen CUA** Accessibility and Screen Recording access. |
 | Windows 10 1903+ or Windows 11, x64 | [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio) with the Desktop development with C++ workload (x64 MSVC tools and Windows SDK), plus the 64-bit `csc.exe` from .NET Framework. | A logged-in interactive desktop and [.NET Framework 4.8 or 4.8.1](https://learn.microsoft.com/en-us/dotnet/framework/get-started/system-requirements). |
 | glibc Linux, x86_64 or ARM64 | A system C compiler and linker. The driver uses the distribution's CPython and PyGObject, described below. | AT-SPI 2, the graphical session's D-Bus, and the X11 and xkbcommon libraries. Screenshots and simulated mouse and keyboard input require an X11 session. On Wayland, the SDK can use the accessibility trees and actions exposed by apps. |
 
@@ -84,7 +84,9 @@ To use an existing host Python environment, replace `--python .venv` with its pa
 
 ## 4. Check desktop permissions and verify the SDK
 
-Open a terminal on the logged-in, unlocked target desktop, enter the runtime directory from step 3, and check permissions. Windows needs the interactive desktop session. On Linux, the terminal must inherit the display and D-Bus environment from the target graphical session. On macOS, run the second command to request missing permissions, approve them in System Settings under Privacy & Security, and check again. Grant access to the actual host if you later start MCP or the SDK from a different one.
+Open a terminal on the logged-in, unlocked target desktop, enter the runtime directory from step 3, and check permissions. Windows needs the interactive desktop session. On Linux, the terminal must inherit the display and D-Bus environment from the target graphical session.
+
+On macOS, the first operation that needs a missing permission opens the corresponding System Settings pane and shows the **Jiuwen CUA** guide at the bottom of the window. You can also open it with the second command. Turn on **Jiuwen CUA** if it is already listed. Otherwise, drag the app from the guide into the list and turn it on. If dragging is unavailable, click **Copy App Path** and close the guide. In System Settings, click **+**, press **Shift-Command-G**, paste the path, and select **Open**. If macOS asks you to quit and reopen the app, follow the prompt and check permissions again.
 
 ```sh
 uv run --no-project --python .venv computer-use-permissions
@@ -93,6 +95,8 @@ uv run --no-project --python .venv computer-use-permissions
 ```sh
 uv run --no-project --python .venv computer-use-permissions --request
 ```
+
+Source builds use ad hoc signing. If the permission check reports missing access after a rebuild, grant access to the current **Jiuwen CUA** build in System Settings.
 
 Open an app with a visible window, such as Calculator. The first command lists running apps. Replace `APP_NAME` in the second with a name from the list. The output should contain controls or text from the actual window.
 

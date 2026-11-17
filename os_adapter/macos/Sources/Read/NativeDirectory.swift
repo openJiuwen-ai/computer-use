@@ -286,7 +286,7 @@ import ApplicationServices
             }
         } else {
             DesktopPermission.accessibility.guideOnce()
-            reasons.append("accessibility permission unavailable")
+            reasons.append(DesktopPermission.accessibility.settingsHelp)
         }
         try BackgroundTarget(app).validate()
         try RequestDiagnostics.checkCancellation()
@@ -753,7 +753,10 @@ import ApplicationServices
             rootDiscoveryComplete = false
         }
         if !windowServices.trusted() {
-            if profile == .accessibility { DesktopPermission.accessibility.guideOnce() }
+            if profile == .accessibility {
+                DesktopPermission.accessibility.guideOnce()
+                reasons.append(DesktopPermission.accessibility.settingsHelp)
+            }
             reasons.append("accessibility permission unavailable; native windows are retained")
             rootDiscoveryComplete = false
         }

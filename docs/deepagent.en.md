@@ -25,8 +25,6 @@ uv run --python 3.12 --no-sync computer-use-build
 uv run --python 3.12 --no-sync computer-use-permissions
 ```
 
-On macOS, use `uv run --python 3.12 --no-sync computer-use-permissions --request` to request missing permissions. Approve them in **System Settings → Privacy & Security**, then run the check again. Run the commands from the same terminal or host connection that will launch the SDK or its MCP adapter.
-
 ## 3. Create a desktop agent
 
 For a wheel installation, select the `agent` extra. It includes MCP and requires `openjiuwen>=0.1.19.post3`.

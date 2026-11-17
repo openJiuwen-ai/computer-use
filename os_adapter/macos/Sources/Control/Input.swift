@@ -102,11 +102,7 @@ import Carbon
     static func source() throws -> CGEventSource {
         guard DesktopPermission.postEvents.granted else {
             DesktopPermission.postEvents.guideOnce()
-            throw DriverError(
-                """
-                accessibility permission denied; enable the driver or its launching terminal in System \
-                Settings > Privacy & Security
-                """, code: .desktopUnavailable)
+            throw DriverError(DesktopPermission.postEvents.settingsHelp, code: .desktopUnavailable)
         }
         guard let source = CGEventSource(stateID: .privateState) else {
             throw DriverError("cannot create input source")

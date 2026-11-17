@@ -242,7 +242,7 @@ import CoreGraphics
             }
         } else {
             DesktopPermission.screenCapture.guideOnce()
-            for display in geometry.displays { failures[display.id] = "screen recording permission denied" }
+            for display in geometry.displays { failures[display.id] = DesktopPermission.screenCapture.settingsHelp }
         }
         try RequestDiagnostics.checkCancellation()
         try BackgroundTarget.validateDesktop()
