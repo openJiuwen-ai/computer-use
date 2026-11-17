@@ -22,7 +22,7 @@ def write_result(stream: TextIO, value: str) -> None:
 class _StrictStreamHandler(logging.StreamHandler):
     """Keep output delivery errors visible to command-line callers."""
 
-    def handleError(self, record):
+    def handleError(self, record):  # noqa: N802 - overrides logging.Handler.handleError
         error = sys.exception()
         if error is None:
             raise RuntimeError("Output error handler requires an active exception")

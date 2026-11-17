@@ -125,6 +125,17 @@ Issues and pull requests are welcome. Before submitting, please make sure that:
 2. engine-layer changes introduce no dependency on any agent framework;
 3. new behavior is covered by unit tests or a reproducible probe script.
 
+Install the hook from the repository root once per clone. The tools use isolated environments, so you can check a fresh clone without building the SDK.
+
+```sh
+uv tool install --python 3.12 "pre-commit==4.6.0"
+pre-commit install --install-hooks
+```
+
+`git commit` checks staged Python source and stub files, JSON/YAML/TOML syntax, and merge conflict markers.
+If a check blocks a commit, fix the reported issue and stage the fix before retrying.
+Run `pre-commit run --all-files` to check all tracked files manually. CI CodeCheck still determines whether a PR passes its check.
+
 ## License
 
 This project is licensed under Apache License 2.0.

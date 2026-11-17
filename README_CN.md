@@ -124,6 +124,17 @@ computer-use/
 2. 引擎层改动不引入对任何智能体框架的依赖；
 3. 新增行为有对应的单元测试或可复现的探针脚本。
 
+克隆后，在仓库根目录安装一次本地提交检查。检查工具使用独立环境，无需构建 SDK。
+
+```sh
+uv tool install --python 3.12 "pre-commit==4.6.0"
+pre-commit install --install-hooks
+```
+
+`git commit` 会检查暂存的 Python 源码和类型桩、JSON/YAML/TOML 语法以及合并冲突标记。
+检查发现问题时会阻止提交。按提示修复并重新暂存后再提交。
+运行 `pre-commit run --all-files` 可手动检查全部已跟踪文件。PR 门禁以 CI 的 CodeCheck 结果为准。
+
 ## 开源许可证
 
 本项目基于 [Apache License 2.0](LICENSE) 开源。
