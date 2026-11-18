@@ -70,8 +70,7 @@ def check_mixed_line_endings(data):
 def check_assignment_expression(node):
     """Check G.OPR.04: find assignment expressions (:=), advisory by default."""
     if isinstance(node, ast.NamedExpr):
-        return "G.OPR.04", node
-    return None
+        yield "G.OPR.04", node
 
 
 def check_negative_slice_step(node):
@@ -79,8 +78,7 @@ def check_negative_slice_step(node):
     if isinstance(node, ast.Slice):
         step = literal_number(node.step)
         if isinstance(step, (int, float)) and step < 0:
-            return "G.TYP.05", node.step
-    return None
+            yield "G.TYP.05", node.step
 
 
 def check_zero_divisor(node):
@@ -91,8 +89,205 @@ def check_zero_divisor(node):
     """
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
         if literal_number(node.left) is not None and literal_number(node.right) == 0:
-            return "G.OPR.01", node.right
-    return None
+            yield "G.OPR.01", node.right
+
+
+def local_body_nodes(function):
+    """Walk a function body without entering nested function, lambda or class bodies."""
+    pending = list(reversed(function.body))
+    while pending:
+        node = pending.pop()
+        yield node
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            pending.extend(reversed(list(ast.iter_child_nodes(node))))
+
+
+def literal_type(node):
+    """Identify literal and container-expression types without executing source code."""
+    if node is None:
+        return type(None)
+    if isinstance(node, ast.Constant):
+        return type(node.value)
+    for kinds, value_type in (
+        ((ast.List, ast.ListComp), list),
+        ((ast.Tuple,), tuple),
+        ((ast.Set, ast.SetComp), set),
+        ((ast.Dict, ast.DictComp), dict),
+        ((ast.JoinedStr,), str),
+    ):
+        if isinstance(node, kinds):
+            return value_type
+    number = literal_number(node)
+    return type(number) if number is not None else None
+
+
+def magic_method_returns(node, name):
+    """Find returns in undecorated synchronous methods, excluding generator methods."""
+    if not isinstance(node, ast.ClassDef):
+        return
+    for method in node.body:
+        if not isinstance(method, ast.FunctionDef) or method.name != name or method.decorator_list:
+            continue
+        body = list(local_body_nodes(method))
+        if any(isinstance(child, (ast.Yield, ast.YieldFrom)) for child in body):
+            continue
+        for child in body:
+            if isinstance(child, ast.Return):
+                yield child
+
+
+def invalid_literal_returns(node, name, allowed_types):
+    """Find magic-method returns with known literal types outside the allowed set."""
+    for statement in magic_method_returns(node, name):
+        value_type = literal_type(statement.value)
+        if value_type is not None and value_type not in allowed_types:
+            yield statement.value if statement.value is not None else statement
+
+
+def check_iter_return(node):
+    """Check G.CLS.09/iter: literal containers and scalars are not iterator objects.
+
+    Generator methods, generator expressions and unknown return types are allowed.
+    Decorated and asynchronous methods are outside this check's inference scope.
+    """
+    for location in invalid_literal_returns(node, "__iter__", ()):
+        yield "G.CLS.09", location
+
+
+def check_bool_return(node):
+    """Check G.CLS.09/bool: ordinary __bool__ methods must return bool, not another literal type."""
+    for location in invalid_literal_returns(node, "__bool__", (bool,)):
+        yield "G.CLS.09", location
+
+
+def check_repr_return(node):
+    """Check G.CLS.09/repr: ordinary __repr__ methods must return str; unknown types are unchecked."""
+    for location in invalid_literal_returns(node, "__repr__", (str,)):
+        yield "G.CLS.09", location
+
+
+def check_length_hint_return(node):
+    """Check G.CLS.09/length_hint: literal results must be non-negative integers.
+
+    Boolean integers and NotImplemented are allowed by the length-hint protocol.
+    Unknown results, decorated methods and generator methods remain unchecked.
+    """
+    for statement in magic_method_returns(node, "__length_hint__"):
+        value_type = literal_type(statement.value)
+        number = literal_number(statement.value)
+        if (value_type is not None and value_type not in (int, bool)) or (isinstance(number, int) and number < 0):
+            yield "G.CLS.09", statement.value if statement.value is not None else statement
+
+
+def check_format_return(node):
+    """Check G.CLS.09/format: ordinary __format__ methods must return str; unknown types are unchecked."""
+    for location in invalid_literal_returns(node, "__format__", (str,)):
+        yield "G.CLS.09", location
+
+
+def check_getnewargs_return(node):
+    """Check G.CLS.09/getnewargs: ordinary __getnewargs__ methods must return a tuple."""
+    for location in invalid_literal_returns(node, "__getnewargs__", (tuple,)):
+        yield "G.CLS.09", location
+
+
+def check_getnewargs_ex_return(node):
+    """Check G.CLS.09/getnewargs_ex: literal results must have shape (tuple, dict).
+
+    Tuple unpacking and unknown component types are not inferred. Decorated,
+    asynchronous and generator methods remain outside this check's scope.
+    """
+    for statement in magic_method_returns(node, "__getnewargs_ex__"):
+        value = statement.value
+        value_type = literal_type(value)
+        invalid = value_type is not None and value_type is not tuple
+        if isinstance(value, ast.Tuple) and not any(isinstance(item, ast.Starred) for item in value.elts):
+            invalid = len(value.elts) != 2 or any(
+                literal_type(item) is not None and literal_type(item) is not expected
+                for item, expected in zip(value.elts, (tuple, dict))
+            )
+        if invalid:
+            yield "G.CLS.09", value if value is not None else statement
+
+
+def check_missing_method_receiver(node):
+    """Check G.NAM.03/no-arguments: ordinary methods need a positional receiver.
+
+    Decorated methods and methods accepting *args are allowed; this check does
+    not infer custom descriptors or enforce receiver names already checked by Ruff.
+    """
+    if isinstance(node, ast.ClassDef):
+        for method in node.body:
+            if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)) and not method.decorator_list:
+                if not (method.args.posonlyargs or method.args.args or method.args.vararg):
+                    yield "G.NAM.03", method
+
+
+def check_redundant_reraise(node):
+    """Check G.ERR.13: a final ordinary except block containing only bare raise.
+
+    Earlier handlers may protect exceptions from later handlers and are allowed.
+    Handlers with logging or cleanup, and except* handlers, remain unchecked.
+    """
+    if isinstance(node, ast.Try) and node.handlers:
+        handler = node.handlers[-1]
+        if len(handler.body) == 1 and isinstance(handler.body[0], ast.Raise) and handler.body[0].exc is None:
+            yield "G.ERR.13", handler.body[0]
+
+
+def check_unreachable_statements(node):
+    """Check G.CTL.02: statements following an unconditional jump in the same block.
+
+    Only return/raise/break/continue are terminators. Branch conditions and
+    cross-function control flow are not inferred.
+    """
+    for _, statements in ast.iter_fields(node):
+        if not isinstance(statements, list) or not all(isinstance(item, ast.stmt) for item in statements):
+            continue
+        terminated = False
+        for statement in statements:
+            if terminated:
+                yield "G.CTL.02", statement
+            if isinstance(statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+                terminated = True
+
+
+def check_class_docstring_layout(node):
+    """Check G.CMT.02: existing class docstrings belong on an indented body line.
+
+    Check same-line placement and indentation relative to the class. Missing
+    docstrings and blank lines before an existing docstring are not checked.
+    """
+    if isinstance(node, ast.ClassDef) and ast.get_docstring(node) is not None:
+        docstring = node.body[0]
+        if docstring.lineno == node.lineno or docstring.col_offset != node.col_offset + 4:
+            yield "G.CMT.02", docstring
+
+
+def check_public_docstring_layout(node):
+    """Check G.CMT.03: existing public-function docstrings belong on an indented body line.
+
+    Names starting with underscore, missing docstrings and intervening blank
+    lines are outside this check's scope; multiline function headers are allowed.
+    """
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith("_"):
+        if ast.get_docstring(node) is not None:
+            docstring = node.body[0]
+            if docstring.lineno == node.lineno or docstring.col_offset != node.col_offset + 4:
+                yield "G.CMT.03", docstring
+
+
+def check_todo_fixme_comments(tokens):
+    """Check G.CMT.05: find TODO/FIXME words in comments, ignoring strings.
+
+    Markers are case-insensitive whole words. custom_findings excludes this
+    project's tests directory from this production-code check.
+    """
+    for token in tokens:
+        if token.type == tokenize.COMMENT:
+            match = re.search(r"\b(?:TODO|FIXME)\b", token.string, re.IGNORECASE)
+            if match:
+                yield token.start[0], token.start[1] + match.start() + 1
 
 
 def custom_findings(data: bytes, filename: str):
@@ -118,25 +313,43 @@ def custom_findings(data: bytes, filename: str):
 
     findings = []
 
-    def emit(code, line, column):
+    def emit(code, line, column, check):
         if code not in ignored.get(line, ()):
-            findings.append({"filename": filename, "line": line, "column": column, "code": code})
+            findings.append(
+                {"filename": filename, "line": line, "column": column, "code": code, "check": check.__name__}
+            )
 
     for line, column in check_four_space_indentation(tokens):
-        emit("G.FMT.01", line, column)
+        emit("G.FMT.01", line, column, check_four_space_indentation)
     for line, column in check_mixed_line_endings(data):
-        emit("G.FMT.10", line, column)
+        emit("G.FMT.10", line, column, check_mixed_line_endings)
+    if not Path(filename).resolve().is_relative_to(ROOT / "tests"):
+        for line, column in check_todo_fixme_comments(tokens):
+            emit("G.CMT.05", line, column, check_todo_fixme_comments)
 
     lines = source.splitlines()
     for node in ast.walk(tree):
-        for check in (check_assignment_expression, check_negative_slice_step, check_zero_divisor):
-            finding = check(node)
-            if finding is None:
-                continue
-            code, location = finding
-            # AST columns are UTF-8 byte offsets; diagnostics use character columns.
-            prefix = lines[location.lineno - 1].encode("utf-8")[: location.col_offset].decode("utf-8")
-            emit(code, location.lineno, len(prefix) + 1)
+        for check in (
+            check_assignment_expression,
+            check_negative_slice_step,
+            check_zero_divisor,
+            check_iter_return,
+            check_bool_return,
+            check_repr_return,
+            check_length_hint_return,
+            check_format_return,
+            check_getnewargs_return,
+            check_getnewargs_ex_return,
+            check_missing_method_receiver,
+            check_redundant_reraise,
+            check_unreachable_statements,
+            check_class_docstring_layout,
+            check_public_docstring_layout,
+        ):
+            for code, location in check(node):
+                # AST columns are UTF-8 byte offsets; diagnostics use character columns.
+                prefix = lines[location.lineno - 1].encode("utf-8")[: location.col_offset].decode("utf-8")
+                emit(code, location.lineno, len(prefix) + 1, check)
     return findings
 
 
@@ -264,7 +477,7 @@ def check_files(files, rules, settings, strict):
     Ruff and custom checks accept .py and .pyi; the other tools receive .py only.
     Return 0 for success, 1 for blocking findings, or 2 for an incomplete check.
     """
-    messages = {rule["code"]: rule["message"] for rule in rules if "message" in rule}
+    messages = {name: rule["message"] for rule in rules if "message" in rule for name in rule["local_rules"]}
     paths = [str(Path(name).resolve()) for name in files]
     result = subprocess.run(
         [*ruff_command("--no-fix", "--output-format=json"), "--", *paths],
@@ -320,7 +533,8 @@ def check_files(files, rules, settings, strict):
             code = item["code"]
             warning = code in settings["advisory"] and not strict
             level = "提示" if warning else "错误"
-            sys.stdout.write(f"{filename}:{item['line']}:{item['column']}: {code} [{level}] {messages[code]}\n")
+            message = messages[item["check"]]
+            sys.stdout.write(f"{filename}:{item['line']}:{item['column']}: {code} [{level}] {message}\n")
             if not warning:
                 status = 1
     status = max(status, pylint_checks(sources, rules, settings))

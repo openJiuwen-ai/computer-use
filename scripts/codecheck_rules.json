@@ -658,8 +658,11 @@
       "name": "G.NAM.03 “self”应是实例方法的第一个参数，“cls”应是类方法的第一个参数--没有参数",
       "severity": "一般",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_missing_method_receiver"
+      ],
+      "coverage": "部分覆盖。检查类内未装饰方法缺少位置参数且不接受 *args；不推断自定义描述符或装饰器。",
+      "message": "普通实例方法缺少接收实例的位置参数。"
     },
     {
       "id": "7f5dcd046d6b11edab16fa163e0fa374",
@@ -678,8 +681,11 @@
       "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--iter",
       "severity": "严重",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_iter_return"
+      ],
+      "coverage": "部分覆盖。检查未装饰的普通同步 __iter__ 返回标量或容器字面量；允许生成器方法，未知返回值不推断。",
+      "message": "__iter__ 必须返回迭代器，不能返回标量或容器字面量。"
     },
     {
       "id": "806662af6d6b11edab16fa163e0fa374",
@@ -698,8 +704,11 @@
       "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--bool",
       "severity": "严重",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_bool_return"
+      ],
+      "coverage": "部分覆盖。检查未装饰、非生成器同步 __bool__ 的字面量返回类型，仅允许 bool；未知返回值不推断。",
+      "message": "__bool__ 的返回值必须是 bool。"
     },
     {
       "id": "80fbb2206d6e11edab16fa163e0fa374",
@@ -727,8 +736,11 @@
       "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--repr",
       "severity": "严重",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_repr_return"
+      ],
+      "coverage": "部分覆盖。检查未装饰、非生成器同步 __repr__ 的字面量返回类型，仅允许 str；未知返回值不推断。",
+      "message": "__repr__ 的返回值必须是 str。"
     },
     {
       "id": "827fc7956d6b11edab16fa163e0fa374",
@@ -780,8 +792,11 @@
       "name": "G.CMT.02 类的文档字符串写在类声明(class ClassName:)所在行的下一行，并向后缩进4个空格",
       "severity": "一般",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_class_docstring_layout"
+      ],
+      "coverage": "部分覆盖。仅检查已有类 docstring 与 class 同行或缩进非相对4空格；不要求补写缺失文档，也不检查前置空行。",
+      "message": "类文档字符串应放在类体内独立一行，并相对 class 缩进4个空格。"
     },
     {
       "id": "840c13846d6b11edab16fa163e0fa374",
@@ -789,8 +804,11 @@
       "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--length_hint",
       "severity": "严重",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_length_hint_return"
+      ],
+      "coverage": "部分覆盖。检查未装饰、非生成器同步 __length_hint__ 返回字面量非整数或负整数；允许 bool 整数及 NotImplemented，未知值不推断。",
+      "message": "__length_hint__ 的返回值必须是非负整数或 NotImplemented。"
     },
     {
       "id": "848ed6406d6511edab16fa163e0fa374",
@@ -798,8 +816,11 @@
       "name": "G.CMT.03 公共函数的文档字符串写在函数声明(def function_name(param):)所在行的下一行，并向后缩进4个空格",
       "severity": "一般",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_public_docstring_layout"
+      ],
+      "coverage": "部分覆盖。仅检查已有公共函数 docstring 与 def 同行或缩进非相对4空格；忽略下划线开头函数、缺失文档及前置空行。",
+      "message": "公共函数文档字符串应放在函数体内独立一行，并相对 def 缩进4个空格。"
     },
     {
       "id": "8491e1c36d6b11edab16fa163e0fa374",
@@ -807,8 +828,11 @@
       "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--format",
       "severity": "严重",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_format_return"
+      ],
+      "coverage": "部分覆盖。检查未装饰、非生成器同步 __format__ 的字面量返回类型，仅允许 str；未知返回值不推断。",
+      "message": "__format__ 的返回值必须是 str。"
     },
     {
       "id": "851353366d6511edab16fa163e0fa374",
@@ -825,8 +849,11 @@
       "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--getnewargs",
       "severity": "严重",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_getnewargs_return"
+      ],
+      "coverage": "部分覆盖。检查未装饰、非生成器同步 __getnewargs__ 的字面量返回类型，仅允许 tuple；未知返回值不推断。",
+      "message": "__getnewargs__ 的返回值必须是 tuple。"
     },
     {
       "id": "85975a466d6511edab16fa163e0fa374",
@@ -843,8 +870,11 @@
       "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--getnewargs_ex",
       "severity": "严重",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_getnewargs_ex_return"
+      ],
+      "coverage": "部分覆盖。检查未装饰、非生成器同步 __getnewargs_ex__ 返回字面量的二元组及 (tuple, dict) 结构；含解包或未知成员类型时不推断。",
+      "message": "__getnewargs_ex__ 必须返回 (tuple, dict) 结构的二元组。"
     },
     {
       "id": "861c453e6d6511edab16fa163e0fa374",
@@ -1013,8 +1043,11 @@
       "name": "G.CTL.02 所有的代码都必须是逻辑可达的",
       "severity": "严重",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_unreachable_statements"
+      ],
+      "coverage": "部分覆盖。检查同一语句块中 return/raise/break/continue 之后的语句；不推断条件恒值及跨函数控制流。",
+      "message": "无条件跳转后的同块语句不可达。"
     },
     {
       "id": "8ac804726d6511edab16fa163e0fa374",
@@ -1153,8 +1186,11 @@
       "name": "G.CMT.05 正式交付给客户的代码不应包含TODO/FIXME注释",
       "severity": "一般",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_todo_fixme_comments"
+      ],
+      "coverage": "部分覆盖。检查生产源码注释中大小写不敏感的完整 TODO/FIXME 标记；忽略字符串，排除本项目 tests 目录。",
+      "message": "生产源码注释中不应保留 TODO/FIXME 标记。"
     },
     {
       "id": "9107364a6d6b11edab16fa163e0fa374",
@@ -1191,8 +1227,11 @@
       "name": "G.ERR.13 捕获异常后避免直接重新抛出",
       "severity": "一般",
       "language": "PYTHON",
-      "local_rules": [],
-      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+      "local_rules": [
+        "check_redundant_reraise"
+      ],
+      "coverage": "部分覆盖。仅检查最后一个普通 except 块唯一语句为无参 raise；保留用于避开后续处理器的提前重抛，以及日志、清理和 except* 场景。",
+      "message": "except 块仅直接重新抛出异常，请移除冗余处理器或补充必要的处理。"
     },
     {
       "id": "9376de1f6d6b11edab16fa163e0fa374",

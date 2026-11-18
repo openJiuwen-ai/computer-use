@@ -4,7 +4,7 @@
 
 ## 覆盖范围
 
-共 132 条规则：26 条已覆盖、19 条部分覆盖、87 条待补充。状态表示当前本地实现的范围，具体触发条件见对应行；PR 门禁仍以 CI 结果为准。规则清单保存在 [codecheck_rules.json](../scripts/codecheck_rules.json)。
+共 132 条规则：26 条已覆盖、32 条部分覆盖、74 条待补充。状态表示当前本地实现的范围，具体触发条件见对应行；PR 门禁仍以 CI 结果为准。规则清单保存在 [codecheck_rules.json](../scripts/codecheck_rules.json)。
 
 工具检查填写规则号，自有检查填写函数名并链接到实现。
 
@@ -22,13 +22,13 @@
 | 禁止硬编码API密钥 | 待补充 | — | — |
 | 禁止硬编码访问密钥 | 待补充 | — | — |
 | `G.CNP.01` 建议为communicate传入超时参数来防止子进程死锁或失去响应 | 待补充 | — | — |
-| `G.TYP.05` 对序列使用切片操作时，不建议使用负步进值进行切片 | 部分覆盖 | [`check_negative_slice_step`](../scripts/check_codecheck.py#L77) | 检查字面量负步长切片，默认提示；变量的运行时值尚未分析。 |
+| `G.TYP.05` 对序列使用切片操作时，不建议使用负步进值进行切片 | 部分覆盖 | [`check_negative_slice_step`](../scripts/check_codecheck.py#L76) | 检查字面量负步长切片，默认提示；变量的运行时值尚未分析。 |
 | `G.FNM.06` 使用return代替StopIteration来结束生成器 | 待补充 | — | — |
 | `G.EDV.01` 禁止使用eval和exec函数执行不可信代码 | 待补充 | — | — |
 | `G.EDV.02` 禁止使用OS命令解析器或“危险函数”调用系统命令 | 待补充 | — | — |
 | `G.FIO.01` 在多用户系统中创建文件时应根据需要指定合适的权限 | 待补充 | — | — |
 | `G.SER.01` 禁止使用pickle.load、\_pickle.load和shelve模块加载外部数据 | 待补充 | — | — |
-| `G.OPR.01` 对除法运算和模运算中的除数为0的情况做相应保护 | 部分覆盖 | [`check_zero_divisor`](../scripts/check_codecheck.py#L86) | 检查 /、//、% 的两个操作数均为数值字面量且除数为零的情形，字符串格式化、未知类型、增量赋值和跨函数保护尚未分析。 |
+| `G.OPR.01` 对除法运算和模运算中的除数为0的情况做相应保护 | 部分覆盖 | [`check_zero_divisor`](../scripts/check_codecheck.py#L84) | 检查 /、//、% 的两个操作数均为数值字面量且除数为零的情形，字符串格式化、未知类型、增量赋值和跨函数保护尚未分析。 |
 | `G.ERR.08` 禁止通过异常泄露敏感数据 | 待补充 | — | — |
 | `G.LOG.02` 使用日志记录工具实现日志功能 | 部分覆盖 | `T201` | 检查 print 调用。 |
 | `G.SER.02` 禁止序列化未加密的敏感数据 | 待补充 | — | — |
@@ -76,26 +76,26 @@
 | `G.FMT.10` 代码行的行尾结束符LF和CRLF不应该混用 | 已覆盖 | [`check_mixed_line_endings`](../scripts/check_codecheck.py#L59) | 检查同一文件混用 LF 和 CRLF，统一采用任一风格均可通过。 |
 | `G.TYP.04` 建议使用if seq或if not seq的方式判断序列是否为空 | 待补充 | — | — |
 | `G.ERR.14` 不要使用return、break、continue或抛出异常使finally块非正常结束--不支持finally中的continue | 已覆盖 | `B012` | 检查 finally 中会退出当前块的 continue。 |
-| `G.NAM.03` “self”应是实例方法的第一个参数，“cls”应是类方法的第一个参数--没有参数 | 待补充 | — | — |
+| `G.NAM.03` “self”应是实例方法的第一个参数，“cls”应是类方法的第一个参数--没有参数 | 部分覆盖 | [`check_missing_method_receiver`](../scripts/check_codecheck.py#L213) | 检查类内未装饰方法缺少位置参数且不接受 *args；不推断自定义描述符或装饰器。 |
 | `G.NAM.03` “self”应是实例方法的第一个参数，“cls”应是类方法的第一个参数--self | 已覆盖 | `N805` | 检查实例方法的第一个参数名称。 |
-| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--iter | 待补充 | — | — |
+| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--iter | 部分覆盖 | [`check_iter_return`](../scripts/check_codecheck.py#L147) | 检查未装饰的普通同步 \_\_iter\_\_ 返回标量或容器字面量；允许生成器方法，未知返回值不推断。 |
 | `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--len | 部分覆盖 | `PLE0303` | 检查 Ruff 可推断的 \_\_len\_\_ 非法返回值。 |
-| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--bool | 待补充 | — | — |
+| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--bool | 部分覆盖 | [`check_bool_return`](../scripts/check_codecheck.py#L157) | 检查未装饰、非生成器同步 \_\_bool\_\_ 的字面量返回类型，仅允许 bool；未知返回值不推断。 |
 | IP地址不能硬编码 | 待补充 | — | — |
 | `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--index | 部分覆盖 | `PLE0305` | 检查 Ruff 可推断的 \_\_index\_\_ 非法返回类型。 |
-| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--repr | 待补充 | — | — |
+| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--repr | 部分覆盖 | [`check_repr_return`](../scripts/check_codecheck.py#L163) | 检查未装饰、非生成器同步 \_\_repr\_\_ 的字面量返回类型，仅允许 str；未知返回值不推断。 |
 | `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--str | 部分覆盖 | `PLE0307` | 检查 Ruff 可推断的 \_\_str\_\_ 非法返回类型。 |
 | `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--bytes | 部分覆盖 | `PLE0308` | 检查 Ruff 可推断的 \_\_bytes\_\_ 非法返回类型。 |
 | `G.NAM.01` 使用统一的命名风格 | 部分覆盖 | `N802` | 检查函数名称，保留已记录的标准库覆盖方法例外。 |
 | `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--hash | 部分覆盖 | `PLE0309` | 检查 Ruff 可推断的 \_\_hash\_\_ 非法返回类型。 |
-| `G.CMT.02` 类的文档字符串写在类声明(class ClassName:)所在行的下一行，并向后缩进4个空格 | 待补充 | — | — |
-| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--length\_hint | 待补充 | — | — |
-| `G.CMT.03` 公共函数的文档字符串写在函数声明(def function\_name(param):)所在行的下一行，并向后缩进4个空格 | 待补充 | — | — |
-| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--format | 待补充 | — | — |
+| `G.CMT.02` 类的文档字符串写在类声明(class ClassName:)所在行的下一行，并向后缩进4个空格 | 部分覆盖 | [`check_class_docstring_layout`](../scripts/check_codecheck.py#L255) | 仅检查已有类 docstring 与 class 同行或缩进非相对4空格；不要求补写缺失文档，也不检查前置空行。 |
+| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--length\_hint | 部分覆盖 | [`check_length_hint_return`](../scripts/check_codecheck.py#L169) | 检查未装饰、非生成器同步 \_\_length\_hint\_\_ 返回字面量非整数或负整数；允许 bool 整数及 NotImplemented，未知值不推断。 |
+| `G.CMT.03` 公共函数的文档字符串写在函数声明(def function\_name(param):)所在行的下一行，并向后缩进4个空格 | 部分覆盖 | [`check_public_docstring_layout`](../scripts/check_codecheck.py#L267) | 仅检查已有公共函数 docstring 与 def 同行或缩进非相对4空格；忽略下划线开头函数、缺失文档及前置空行。 |
+| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--format | 部分覆盖 | [`check_format_return`](../scripts/check_codecheck.py#L182) | 检查未装饰、非生成器同步 \_\_format\_\_ 的字面量返回类型，仅允许 str；未知返回值不推断。 |
 | `G.CMT.01` 模块文档字符串写在文件的顶部，Shebang和文件编码声明之后，导入(imports) 部分之前的位置，不需要缩进 | 待补充 | — | — |
-| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--getnewargs | 待补充 | — | — |
+| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--getnewargs | 部分覆盖 | [`check_getnewargs_return`](../scripts/check_codecheck.py#L188) | 检查未装饰、非生成器同步 \_\_getnewargs\_\_ 的字面量返回类型，仅允许 tuple；未知返回值不推断。 |
 | `G.CTL.04` 建议使用 for x in iterable 的方式循环处理可迭代对象 | 待补充 | — | — |
-| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--getnewargs\_ex | 待补充 | — | — |
+| `G.CLS.09` 重写类的魔法函数时必须返回其原型指定的类型--getnewargs\_ex | 部分覆盖 | [`check_getnewargs_ex_return`](../scripts/check_codecheck.py#L194) | 检查未装饰、非生成器同步 \_\_getnewargs\_ex\_\_ 返回字面量的二元组及 (tuple, dict) 结构；含解包或未知成员类型时不推断。 |
 | `G.FMT.07` 导入部分(imports)应该按照标准库、第三方库、应用程序自定义模块的顺序排列导入 | 已覆盖 | `C0411` | 检查标准库、第三方、项目模块和相对导入顺序；tool.codecheck.source-packages 提供可供静态分类的项目包名。 |
 | `G.ERR.10` 同时使用多个except语句时，要注意异常捕获的顺序 | 部分覆盖 | `B025` | 检查同一 try 中重复捕获相同异常，继承关系导致的顺序问题尚未分析。 |
 | `G.FNM.01` 禁止使用可变对象作为参数默认值 | 已覆盖 | `B006` | 检查函数默认参数中的可变对象。 |
@@ -113,7 +113,7 @@
 | `G.CTL.01` 同一个函数所有分支的返回值类型和个数保持一致 | 待补充 | — | — |
 | `G.VAR.01` 禁止在变量的生命周期内修改其类型 | 待补充 | — | — |
 | `G.TYP.07` 使用dict[key]获取 value 时需要注意保证 key 在有效的范围内 | 待补充 | — | — |
-| `G.CTL.02` 所有的代码都必须是逻辑可达的 | 待补充 | — | — |
+| `G.CTL.02` 所有的代码都必须是逻辑可达的 | 部分覆盖 | [`check_unreachable_statements`](../scripts/check_codecheck.py#L238) | 检查同一语句块中 return/raise/break/continue 之后的语句；不推断条件恒值及跨函数控制流。 |
 | `G.TYP.01` 需要精确数值计算的场景，应使用decimal模块，且不要用浮点数构造Decimal | 部分覆盖 | `RUF032` | 检查 Decimal 使用浮点数字面量构造。 |
 | `G.EXP.03` 不应将lambda表达式赋值给变量，应该使用常规函数 | 已覆盖 | `E731` | 检查将 lambda 表达式直接赋值给变量。 |
 | `G.PRJ.04` 建议同一项目内的编码方式保持一致，推荐使用UTF-8 | 待补充 | — | — |
@@ -127,11 +127,11 @@
 | `G.PSL.04` 建议用functools.wraps定义函数装饰器 | 待补充 | — | — |
 | `G.ERR.11` 避免使用SystemExit和sys.exit()，主进程入口中例外 | 待补充 | — | — |
 | `G.PSL.01` 避免使用已经被标记为弃用并有明确替代的方法 | 待补充 | — | — |
-| `G.CMT.05` 正式交付给客户的代码不应包含TODO/FIXME注释 | 待补充 | — | — |
+| `G.CMT.05` 正式交付给客户的代码不应包含TODO/FIXME注释 | 部分覆盖 | [`check_todo_fixme_comments`](../scripts/check_codecheck.py#L280) | 检查生产源码注释中大小写不敏感的完整 TODO/FIXME 标记；忽略字符串，排除本项目 tests 目录。 |
 | `G.VAR.02` 禁止使用global关键字声明不存在的外部变量 | 待补充 | — | — |
 | `G.FNM.02` 函数和lambda表达式不应该使用外部的循环代码中定义的变量 | 已覆盖 | `B023` | 检查循环中函数和 lambda 闭包引用循环变量。 |
 | `G.ERR.05` 使用有明确业务属性的异常类型 | 待补充 | — | — |
-| `G.ERR.13` 捕获异常后避免直接重新抛出 | 待补充 | — | — |
+| `G.ERR.13` 捕获异常后避免直接重新抛出 | 部分覆盖 | [`check_redundant_reraise`](../scripts/check_codecheck.py#L226) | 仅检查最后一个普通 except 块唯一语句为无参 raise；保留用于避开后续处理器的提前重抛，以及日志、清理和 except* 场景。 |
 | `G.ERR.04` 对异常做类型转换时要保留原始异常的错误调用栈信息 | 部分覆盖 | `B904` | 在 except 中抛出新异常时检查显式异常链，允许 from None。 |
 | `G.ERR.09` 在单个except代码块内，禁止重复捕获同类异常 | 已覆盖 | `B014` | 检查单个 except 元组中重复的异常类型。 |
 | `G.FIO.05` 构造文件路径时应屏蔽操作系统的差异，建议使用库函数辅助构造 | 待补充 | — | — |
@@ -183,6 +183,6 @@ Ruff 的例外继续使用其规则号，例如 `# noqa: N802`。`tests` 下允�
 
 更新 `scripts/check_codecheck.py` 或相关检查配置后，须在同一次变更中核对并同步更新检查函数的 docstring、`scripts/codecheck_rules.json` 和本文覆盖表，确保覆盖状态、本地规则映射、检测范围和汇总数量一致。覆盖文档使用生成脚本时，也须同步维护生成脚本并重新生成文档。
 
-自有检查按规则拆分为具名函数，在规则清单的 `local_rules` 中记录函数名，并在覆盖表中链接到实现；函数 docstring 标注规则编号和检测边界。输出文案统一维护在 `message` 字段中，检查脚本按规则编号读取。
+自有检查按规则拆分为具名函数，在规则清单的 `local_rules` 中记录函数名，并在覆盖表中链接到实现；函数 docstring 标注规则编号和检测边界。输出文案统一维护在 `message` 字段中，检查脚本按检查函数读取对应文案，区分同一 CI 编号下的不同规则子项。
 
 CodeCheck 工具自身不单独编写或维护测试用例。
