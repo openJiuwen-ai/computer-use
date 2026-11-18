@@ -91,12 +91,119 @@ def check_negative_slice_step(node):
 def check_zero_divisor(node):
     """G.OPR.01 对除法运算和模运算中的除数为0的情况做相应保护。
 
-    仅检查 /、//、% 的两个操作数均为数值字面量且除数为零的情形。
-    不推断动态类型、增量赋值或跨函数保护，保留字符串格式化和重载运算符的合法用法。
+    检查 /、//、% 的字面量零除数；左操作数须为数值字面量或同一顺序块内可确认的数值。
+    跟踪简单赋值、别名及无参且直接返回数值字面量的普通函数，重绑定后更新结论。
+    未知表达式、可能执行代码的定义和控制流边界会清空绑定，不跨作用域或分支传播。
+    不依据类型注解推断数值，不分析增量赋值；保留字符串格式化和重载运算符的合法用法。
+    仅接收模块节点时进行整文件分析，其他节点不重复检查。
     """
-    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
-        if literal_number(node.left) is not None and literal_number(node.right) == 0:
-            yield "G.OPR.01", node.right
+    if not isinstance(node, ast.Module):
+        return
+
+    confirmed = set()
+
+    def expression_kind(expression, bindings):
+        """仅在整个表达式不含未知副作用时保留数值推断。"""
+        children = list(ast.walk(expression))
+        kinds = {}
+        for child in reversed(children):
+            kind = None
+            if literal_number(child) is not None:
+                kind = "number"
+            elif isinstance(child, ast.Constant) and isinstance(child.value, (str, bytes)):
+                kind = "format"
+            elif isinstance(child, ast.Name):
+                kind = bindings.get(child.id)
+            elif isinstance(child, ast.UnaryOp) and isinstance(child.op, (ast.UAdd, ast.USub)):
+                kind = "number" if kinds.get(child.operand) == "number" else None
+            elif isinstance(child, ast.Call) and not child.args and not child.keywords:
+                kind = "number" if kinds.get(child.func) == "numeric_function" else None
+            elif isinstance(child, ast.BinOp):
+                left, right = kinds.get(child.left), kinds.get(child.right)
+                if left == right == "number" and isinstance(
+                    child.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)
+                ):
+                    kind = "number"
+                elif isinstance(child.op, ast.Mod) and left == "format" and right in ("number", "format"):
+                    kind = "format"
+            kinds[child] = kind
+
+        if any(
+            not isinstance(child, (ast.Name, ast.Constant)) and kinds[child] not in ("number", "format")
+            for child in children
+            if isinstance(child, ast.expr)
+        ):
+            bindings.clear()
+            return None
+        for child in children:
+            if isinstance(child, ast.BinOp) and kinds.get(child.left) == "number":
+                confirmed.add(child)
+        return kinds.get(expression)
+
+    def numeric_function(function):
+        """仅识别未装饰、无参数且直接返回数值字面量的同步函数。"""
+        if not isinstance(function, ast.FunctionDef) or function.decorator_list:
+            return False
+        arguments = function.args
+        if arguments.posonlyargs or arguments.args or arguments.kwonlyargs or arguments.vararg or arguments.kwarg:
+            return False
+        body = function.body
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+            if isinstance(body[0].value.value, str):
+                body = body[1:]
+        return len(body) == 1 and isinstance(body[0], ast.Return) and literal_number(body[0].value) is not None
+
+    def scan_block(statements):
+        """顺序跟踪块内绑定，嵌套块从空环境开始，块间不合并结论。"""
+        bindings = {}
+        for statement in statements:
+            if isinstance(statement, (ast.Assign, ast.AnnAssign)):
+                value = statement.value
+                kind = expression_kind(value, bindings) if value is not None else None
+                targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+                if not all(isinstance(target, ast.Name) for target in targets):
+                    bindings.clear()
+                elif value is not None:
+                    for target in targets:
+                        bindings[target.id] = kind
+                if isinstance(statement, ast.AnnAssign) and not isinstance(statement.annotation, ast.Name):
+                    bindings.clear()
+            elif isinstance(statement, (ast.Expr, ast.Return)):
+                if statement.value is not None:
+                    expression_kind(statement.value, bindings)
+            elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                scan_block(statement.body)
+                arguments = statement.args
+                parameters = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]
+                parameters.extend(item for item in (arguments.vararg, arguments.kwarg) if item is not None)
+                if (
+                    statement.decorator_list
+                    or arguments.defaults
+                    or any(value is not None for value in arguments.kw_defaults)
+                    or statement.returns is not None
+                    or any(parameter.annotation is not None for parameter in parameters)
+                    or getattr(statement, "type_params", ())
+                ):
+                    bindings.clear()
+                bindings[statement.name] = "numeric_function" if numeric_function(statement) else None
+            else:
+                bindings.clear()
+                for _, field in ast.iter_fields(statement):
+                    if isinstance(field, list) and field:
+                        if all(isinstance(child, ast.stmt) for child in field):
+                            scan_block(field)
+                        else:
+                            for child in field:
+                                if isinstance(child, (ast.ExceptHandler, ast.match_case)):
+                                    scan_block(child.body)
+            if isinstance(statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+                break
+
+    scan_block(node.body)
+    for child in ast.walk(node):
+        if isinstance(child, ast.BinOp) and isinstance(child.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+            if literal_number(child.right) == 0 and (literal_number(child.left) is not None or child in confirmed):
+                yield "G.OPR.01", child.right
 
 
 def local_body_nodes(function):
