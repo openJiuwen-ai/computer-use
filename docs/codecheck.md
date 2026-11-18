@@ -181,8 +181,4 @@ Ruff 的例外继续使用其规则号，例如 `# noqa: N802`。`tests` 下允�
 
 更新 `scripts/check_codecheck.py` 或相关检查配置后，须在同一次变更中核对并同步更新检查函数的 docstring、`scripts/codecheck_rules.json` 和本文覆盖表，确保覆盖状态、本地规则映射、检测范围和汇总数量一致。覆盖文档使用生成脚本时，也须同步维护生成脚本并重新生成文档。
 
-回归测试应包含违规、修复后和相邻合法样例，可在独立工具环境中运行，无需安装 SDK。
-
-```sh
-uv run --no-project --python .build/codecheck python -I -m unittest discover -s tests/codecheck -v
-```
+CodeCheck 工具自身不单独编写或维护测试用例。
