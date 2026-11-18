@@ -254,7 +254,12 @@ def native_driver(platform=None, root=None):
         if bundled is not None:
             return {"command": str(bundled), "args": []}
         if not _windows_executables_fit(_installed_runtime_target(assets) / _WINDOWS_BUILD):
-            bundled = _windows_bundled_driver(assets)
+            # PyInstaller one-file bundles extract resources outside the executable directory.
+            bundle_directory = getattr(sys, "_MEIPASS", None)
+            if bundle_directory:
+                bundled = _windows_bundled_driver(assets, app_directory=Path(bundle_directory))
+            if bundled is None:
+                bundled = _windows_bundled_driver(assets)
             if bundled is not None:
                 return {"command": str(bundled), "args": []}
     root = Path(root) if root is not None else repository_root()
