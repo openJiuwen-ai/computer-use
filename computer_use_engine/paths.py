@@ -159,17 +159,26 @@ def _windows_executables_fit(directory):
     return True
 
 
-def _short_windows_bundled_driver(assets):
-    """Use only the installed, co-located, manifest-verified release bundle."""
-    from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION
-
+def _windows_bundled_driver(assets, *, app_directory=None):
+    """Resolve a co-located driver in a frozen app or a verified wheel."""
     try:
         root = assets.resolve(strict=True)
         directory = (root / _WINDOWS_BUILD).resolve(strict=True)
         if root.parent != assets.parent.resolve() or not directory.is_relative_to(root):
             return None
+        if app_directory is not None and not directory.is_relative_to(app_directory.resolve()):
+            return None
         if not _windows_executables_fit(directory):
             return None
+        expected = {(_WINDOWS_BUILD / name).as_posix(): directory / name for name in _WINDOWS_FILES}
+        if any(path.resolve(strict=True) != path or not path.is_file() for path in expected.values()):
+            return None
+        if app_directory is not None:
+            # Installer signing can change the PE hashes recorded by the SDK wheel.
+            return directory / _WINDOWS_DRIVER
+
+        from computer_use.protocol.session import NATIVE_PROTOCOL_VERSION
+
         manifest_path = root / "backend.json"
         if manifest_path.resolve(strict=True) != manifest_path:
             return None
@@ -179,12 +188,9 @@ def _short_windows_bundled_driver(assets):
         ) != (1, "windows-x86_64", NATIVE_PROTOCOL_VERSION):
             return None
         files = manifest.get("files")
-        expected = {(_WINDOWS_BUILD / name).as_posix(): directory / name for name in _WINDOWS_FILES}
         if not isinstance(files, dict) or files.keys() != expected.keys():
             return None
         for name, path in expected.items():
-            if path.resolve(strict=True) != path:
-                return None
             with path.open("rb") as stream:
                 if hashlib.file_digest(stream, "sha256").hexdigest() != files[name]["sha256"]:
                     return None
@@ -198,9 +204,15 @@ def repository_root():
     root = checkout_root()
     if root is not None:
         return root
-    # Wheels carry build inputs and optionally a matching prebuilt backend.
-    # Materialize them into a versioned user-owned runtime directory.
     assets = Path(__file__).parent / "_resources"
+    # A complete Windows wheel already has the driver and its companion files together.
+    if (
+        sys.platform == "win32"
+        and not getattr(sys, "frozen", False)
+        and _windows_bundled_driver(assets) is not None
+    ):
+        return assets.resolve()
+    # Materialize resources that need a writable or shorter runtime path.
     target = _installed_runtime_target(assets)
     if target.is_dir():
         return target
@@ -235,10 +247,18 @@ def repository_root():
 
 def native_driver(platform=None, root=None):
     platform = platform or sys.platform
-    if root is None and platform == sys.platform == "win32" and checkout_root() is None:
+    if (
+        root is None
+        and platform == sys.platform == "win32"
+        and getattr(sys, "frozen", False)
+        and checkout_root() is None
+    ):
         assets = Path(__file__).parent / "_resources"
+        bundled = _windows_bundled_driver(assets, app_directory=Path(sys.executable).parent)
+        if bundled is not None:
+            return {"command": str(bundled), "args": []}
         if not _windows_executables_fit(_installed_runtime_target(assets) / _WINDOWS_BUILD):
-            bundled = _short_windows_bundled_driver(assets)
+            bundled = _windows_bundled_driver(assets)
             if bundled is not None:
                 return {"command": str(bundled), "args": []}
     root = Path(root) if root is not None else repository_root()
