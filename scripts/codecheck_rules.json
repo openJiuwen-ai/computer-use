@@ -1,4 +1,6 @@
 {
+  "description": "本地 CodeCheck 的 CI 规则、检查实现、提示文案和覆盖范围清单。修改条目时同步检查脚本及覆盖文档。",
+  "documentation": "../docs/codecheck.md#规则清单维护",
   "rules": [
     {
       "id": "15980b7c6d6511edab16fa163e0fa374",
