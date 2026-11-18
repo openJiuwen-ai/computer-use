@@ -4,11 +4,17 @@ repos:
   - repo: local
     hooks:
       - id: codecheck
-        name: Python CodeCheck preflight (Ruff)
+        name: Python CodeCheck preflight
         entry: python -I scripts/check_codecheck.py
         language: python
-        additional_dependencies: [ruff==0.15.15]
+        additional_dependencies:
+          - ruff==0.15.15
+          - pylint==3.3.9
+          - astroid==3.3.11
+          - isort==6.1.0
+          - pycodestyle==2.14.0
         types_or: [python, pyi]
+        verbose: true
       - id: check-json
         name: Check JSON syntax
         entry: check-json

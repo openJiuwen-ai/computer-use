@@ -1,0 +1,1285 @@
+{
+  "rules": [
+    {
+      "id": "15980b7c6d6511edab16fa163e0fa374",
+      "code": "G.FMT.01",
+      "name": "G.FMT.01 程序块应该采用4个空格缩进风格编写",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "166a27556d6511edab16fa163e0fa374",
+      "code": "G.FMT.04",
+      "name": "G.FMT.04 用空格突出关键字和重要信息",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "16efe8946d6511edab16fa163e0fa374",
+      "code": "G.CMT.04",
+      "name": "G.CMT.04 代码的注释位置和格式应该在项目内保持统一",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "17734f656d6511edab16fa163e0fa374",
+      "code": "G.FMT.03",
+      "name": "G.FMT.03 合理安排空行--类内方法空1行",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "17f6aaa86d6511edab16fa163e0fa374",
+      "code": "G.FMT.06",
+      "name": "G.FMT.06 每行只能导入一个模块",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "E401"
+      ],
+      "coverage": "检查单条 import 语句导入多个模块。"
+    },
+    {
+      "id": "1901ab306d6511edab16fa163e0fa374",
+      "code": "G.FMT.08",
+      "name": "G.FMT.08 一行只写一条语句",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "E701",
+        "E702"
+      ],
+      "coverage": "检查冒号或分号后同行的复合语句。"
+    },
+    {
+      "id": "198514ed6d6511edab16fa163e0fa374",
+      "code": "G.TYP.08",
+      "name": "G.TYP.08 必须使用isinstance判断变量类型",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "E721"
+      ],
+      "coverage": "部分覆盖。检查 type 与类型的等值比较，保留有意使用 is 的精确类型判断。"
+    },
+    {
+      "id": "1a8f9f6c6d6511edab16fa163e0fa374",
+      "code": "G.IMP.02",
+      "name": "G.IMP.02 使用 from ... import ... 语句的注意事项",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "1f5624e76d6c11edab16fa163e0fa374",
+      "code": "1f5624e76d6c11edab16fa163e0fa374",
+      "name": "禁止硬编码密码",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "1ff205a66d6c11edab16fa163e0fa374",
+      "code": "1ff205a66d6c11edab16fa163e0fa374",
+      "name": "禁止硬编码API密钥",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "208487816d6c11edab16fa163e0fa374",
+      "code": "208487816d6c11edab16fa163e0fa374",
+      "name": "禁止硬编码访问密钥",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "5cf29fa06d6b11edab16fa163e0fa374",
+      "code": "G.CNP.01",
+      "name": "G.CNP.01 建议为communicate传入超时参数来防止子进程死锁或失去响应",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "5d8449796d6b11edab16fa163e0fa374",
+      "code": "G.TYP.05",
+      "name": "G.TYP.05 对序列使用切片操作时，不建议使用负步进值进行切片",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "G.TYP.05"
+      ],
+      "coverage": "部分覆盖。检查字面量负步长切片，默认提示；变量的运行时值尚未分析。"
+    },
+    {
+      "id": "5e02617e6d6b11edab16fa163e0fa374",
+      "code": "G.FNM.06",
+      "name": "G.FNM.06 使用return代替StopIteration来结束生成器",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "5e7f019e6d6b11edab16fa163e0fa374",
+      "code": "G.EDV.01",
+      "name": "G.EDV.01 禁止使用eval和exec函数执行不可信代码",
+      "severity": "致命",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "5efbd3b26d6b11edab16fa163e0fa374",
+      "code": "G.EDV.02",
+      "name": "G.EDV.02 禁止使用OS命令解析器或“危险函数”调用系统命令",
+      "severity": "致命",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "5f79471f6d6b11edab16fa163e0fa374",
+      "code": "G.FIO.01",
+      "name": "G.FIO.01 在多用户系统中创建文件时应根据需要指定合适的权限",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "5ff69fa06d6b11edab16fa163e0fa374",
+      "code": "G.SER.01",
+      "name": "G.SER.01 禁止使用pickle.load、_pickle.load和shelve模块加载外部数据",
+      "severity": "致命",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "6073d8a56d6b11edab16fa163e0fa374",
+      "code": "G.OPR.01",
+      "name": "G.OPR.01 对除法运算和模运算中的除数为0的情况做相应保护",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "G.OPR.01"
+      ],
+      "coverage": "部分覆盖。检查 /、//、% 的两个操作数均为数值字面量且除数为零的情形，字符串格式化、未知类型、增量赋值和跨函数保护尚未分析。"
+    },
+    {
+      "id": "60f1ea3c6d6b11edab16fa163e0fa374",
+      "code": "G.ERR.08",
+      "name": "G.ERR.08 禁止通过异常泄露敏感数据",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "617066cc6d6b11edab16fa163e0fa374",
+      "code": "G.LOG.02",
+      "name": "G.LOG.02 使用日志记录工具实现日志功能",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "T201"
+      ],
+      "coverage": "部分覆盖。检查 print 调用。"
+    },
+    {
+      "id": "61eddb636d6b11edab16fa163e0fa374",
+      "code": "G.SER.02",
+      "name": "G.SER.02 禁止序列化未加密的敏感数据",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "626bcc186d6b11edab16fa163e0fa374",
+      "code": "G.ERR.07",
+      "name": "G.ERR.07 避免抑制或忽略异常",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "62ea0b246d6b11edab16fa163e0fa374",
+      "code": "G.TES.01",
+      "name": "G.TES.01 禁止在生产版本的业务代码中使用assert",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "S101"
+      ],
+      "coverage": "检查生产源码的 assert，tests 目录允许测试断言。"
+    },
+    {
+      "id": "636717396d6b11edab16fa163e0fa374",
+      "code": "G.SER.04",
+      "name": "G.SER.04 禁止使用jsonpickle模块的encode/decode或dumps/loads函数",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "TID251"
+      ],
+      "coverage": "检查 jsonpickle.encode/decode/dumps/loads 的导入和引用，包括导入别名。"
+    },
+    {
+      "id": "63e48c376d6b11edab16fa163e0fa374",
+      "code": "G.FIO.03",
+      "name": "G.FIO.03 禁止使用tempfile.mktemp创建临时文件",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "S306"
+      ],
+      "coverage": "检查 tempfile.mktemp 调用，包括导入别名。"
+    },
+    {
+      "id": "6462d6906d6b11edab16fa163e0fa374",
+      "code": "G.PRJ.03",
+      "name": "G.PRJ.03 产品代码不要包含任何调试入口点",
+      "severity": "致命",
+      "language": "PYTHON",
+      "local_rules": [
+        "T100"
+      ],
+      "coverage": "部分覆盖。检查 breakpoint、pdb 等 Ruff 能识别的调试入口。"
+    },
+    {
+      "id": "64dfef906d6b11edab16fa163e0fa374",
+      "code": "G.DSP.03",
+      "name": "G.DSP.03 必须使用ssl.SSLSocket代替socket.Socket来进行安全数据交互",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "655de0e16d6b11edab16fa163e0fa374",
+      "code": "G.SER.03",
+      "name": "G.SER.03 禁止使用yaml模块的load函数",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "S506"
+      ],
+      "coverage": "部分覆盖。检查不安全的 yaml.load，显式安全 Loader 和 safe_load 允许使用。"
+    },
+    {
+      "id": "65dbf59d6d6b11edab16fa163e0fa374",
+      "code": "G.DSP.02",
+      "name": "G.DSP.02 安全场景下必须使用密码学意义上的安全随机数",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "665a06ee6d6b11edab16fa163e0fa374",
+      "code": "G.EDV.03",
+      "name": "G.EDV.03 避免在命令解析器中使用通配符",
+      "severity": "致命",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "66d9ab366d6b11edab16fa163e0fa374",
+      "code": "G.LOG.03",
+      "name": "G.LOG.03 禁止直接使用外部数据记录日志",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "67575ea86d6b11edab16fa163e0fa374",
+      "code": "G.LOG.01",
+      "name": "G.LOG.01 logging模块应尽量使用懒插值的能力记录debug等低级别日志",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "G001",
+        "G002",
+        "G003",
+        "G004"
+      ],
+      "coverage": "检查日志中的 format、百分号插值、字符串拼接和 f-string。"
+    },
+    {
+      "id": "67d526126d6b11edab16fa163e0fa374",
+      "code": "G.FIO.02",
+      "name": "G.FIO.02 校验文件路径之前应该先对其进行规范化处理",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "6852e0866d6b11edab16fa163e0fa374",
+      "code": "G.EDV.08",
+      "name": "G.EDV.08 防止正则表达式引起的ReDos攻击",
+      "severity": "致命",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "68d1ee706d6b11edab16fa163e0fa374",
+      "code": "G.FIO.04",
+      "name": "G.FIO.04 临时文件使用完毕应及时删除",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "69507cd86d6b11edab16fa163e0fa374",
+      "code": "G.PRM.03",
+      "name": "G.PRM.03 资源的申请和释放需要成对使用，包括正常和异常场景",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "6a4ae9906d6b11edab16fa163e0fa374",
+      "code": "G.DSP.04",
+      "name": "G.DSP.04 禁止在用户界面、日志中暴露不必要信息",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "6ac7e7ae6d6b11edab16fa163e0fa374",
+      "code": "G.DSP.01",
+      "name": "G.DSP.01 将敏感对象发送出信任区域前进行签名并加密",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "6b456a456d6b11edab16fa163e0fa374",
+      "code": "G.EDV.06",
+      "name": "G.EDV.06 禁止直接使用外部数据来拼接SQL语句",
+      "severity": "致命",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "6bc2b0846d6b11edab16fa163e0fa374",
+      "code": "G.EDV.05",
+      "name": "G.EDV.05 调用外部可执行程序时建议使用绝对路径",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "6c3ffd1d6d6b11edab16fa163e0fa374",
+      "code": "G.EDV.04",
+      "name": "G.EDV.04 禁止使用subprocess模块中的shell=True选项",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "S602"
+      ],
+      "coverage": "检查 subprocess 中的 shell=True，包括可解析的导入别名。"
+    },
+    {
+      "id": "6cbdaad06d6b11edab16fa163e0fa374",
+      "code": "G.EDV.07",
+      "name": "G.EDV.07 不受信任的外部数据禁止使用.format()进行格式化",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "6d3bf18d6d6b11edab16fa163e0fa374",
+      "code": "G.FIO.06",
+      "name": "G.FIO.06 解压文件必须进行安全检查",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "6db923c96d6b11edab16fa163e0fa374",
+      "code": "G.EDV.10",
+      "name": "G.EDV.10 禁止在处理XML数据时解析不可信的实体",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "6e3768f56d6b11edab16fa163e0fa374",
+      "code": "G.EDV.09",
+      "name": "G.EDV.09 禁止直接使用外部数据来拼接XML",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "73e1bcf86d6b11edab16fa163e0fa374",
+      "code": "G.PSL.02",
+      "name": "G.PSL.02 在datetime的使用过程中注意时区的影响，时区敏感的场景建议显式指定时区",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "7465e8436d6b11edab16fa163e0fa374",
+      "code": "G.FMT.04",
+      "name": "G.FMT.04 用空格突出关键字和重要信息--算术操作符",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "74ea64016d6b11edab16fa163e0fa374",
+      "code": "G.FMT.04",
+      "name": "G.FMT.04 用空格突出关键字和重要信息--位运算操作符",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "7570c9556d6b11edab16fa163e0fa374",
+      "code": "G.FMT.04",
+      "name": "G.FMT.04 用空格突出关键字和重要信息--取余操作符",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "75f559116d6b11edab16fa163e0fa374",
+      "code": "G.FMT.04",
+      "name": "G.FMT.04 用空格突出关键字和重要信息--分隔符",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "7679ecb16d6b11edab16fa163e0fa374",
+      "code": "G.FMT.04",
+      "name": "G.FMT.04 用空格突出关键字和重要信息--关键字后",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "76fdc7616d6b11edab16fa163e0fa374",
+      "code": "G.FMT.03",
+      "name": "G.FMT.03 合理安排空行--类间空2行",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "778244616d6b11edab16fa163e0fa374",
+      "code": "G.FMT.03",
+      "name": "G.FMT.03 合理安排空行--嵌套定义空1行",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "E306"
+      ],
+      "coverage": "检查嵌套同步、异步函数和类定义前的空行；使用 pycodestyle 2.14.0 的 E306。"
+    },
+    {
+      "id": "78072fe96d6b11edab16fa163e0fa374",
+      "code": "G.FMT.08",
+      "name": "G.FMT.08 一行只写一条语句--分号",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "E702"
+      ],
+      "coverage": "检查分号连接多条语句。"
+    },
+    {
+      "id": "788be11f6d6b11edab16fa163e0fa374",
+      "code": "G.FMT.08",
+      "name": "G.FMT.08 一行只写一条语句--定义",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "7910376c6d6b11edab16fa163e0fa374",
+      "code": "G.OPR.06",
+      "name": "G.OPR.06 应该使用 not in 测试成员关系",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "E713"
+      ],
+      "coverage": "检查 not x in y。"
+    },
+    {
+      "id": "799462e86d6b11edab16fa163e0fa374",
+      "code": "G.OPR.05",
+      "name": "G.OPR.05 应该使用 is not 运算符而不是not ... is",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "E714"
+      ],
+      "coverage": "检查 not x is y。"
+    },
+    {
+      "id": "7a1883ff6d6b11edab16fa163e0fa374",
+      "code": "G.OPR.03",
+      "name": "G.OPR.03 禁止使用is或is not运算符在内置类型之间作比较",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "F632"
+      ],
+      "coverage": "部分覆盖。检查与非单例字面量的 is / is not 比较。"
+    },
+    {
+      "id": "7b2310a86d6b11edab16fa163e0fa374",
+      "code": "G.OPR.02",
+      "name": "G.OPR.02 与None作比较要使用is或is not，不要使用等号",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "E711"
+      ],
+      "coverage": "检查与 None 的 == / != 比较。"
+    },
+    {
+      "id": "7ba85df06d6b11edab16fa163e0fa374",
+      "code": "G.NAM.03",
+      "name": "G.NAM.03 “self”应是实例方法的第一个参数，“cls”应是类方法的第一个参数--cls",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "N804"
+      ],
+      "coverage": "检查 classmethod 的第一个参数名称。"
+    },
+    {
+      "id": "7c2dc08a6d6b11edab16fa163e0fa374",
+      "code": "G.NAM.05",
+      "name": "G.NAM.05 除了需要重写魔法函数、对象之外，不推荐使用双下划线开头且双下划线结尾的标识符来命名一般对象",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "N807"
+      ],
+      "coverage": "部分覆盖。检查一般函数自造的双下划线名称。"
+    },
+    {
+      "id": "7cb2e4b66d6b11edab16fa163e0fa374",
+      "code": "G.FMT.02",
+      "name": "G.FMT.02 行宽不超过120个字符",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "C0301"
+      ],
+      "coverage": "按 Pylint 3.3.9 的字符和例外规则检查 120 字符行宽，包括源代码中的中文。"
+    },
+    {
+      "id": "7d4c03896d6b11edab16fa163e0fa374",
+      "code": "G.FMT.10",
+      "name": "G.FMT.10 代码行的行尾结束符LF和CRLF不应该混用",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "G.FMT.10"
+      ],
+      "coverage": "检查同一文件混用 LF 和 CRLF，统一采用任一风格均可通过。"
+    },
+    {
+      "id": "7dcfcd846d6b11edab16fa163e0fa374",
+      "code": "G.TYP.04",
+      "name": "G.TYP.04 建议使用if seq或if not seq的方式判断序列是否为空",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "7e54128e6d6b11edab16fa163e0fa374",
+      "code": "G.ERR.14",
+      "name": "G.ERR.14 不要使用return、break、continue或抛出异常使finally块非正常结束--不支持finally中的continue",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "B012"
+      ],
+      "coverage": "检查 finally 中会退出当前块的 continue。"
+    },
+    {
+      "id": "7ed9bd356d6b11edab16fa163e0fa374",
+      "code": "G.NAM.03",
+      "name": "G.NAM.03 “self”应是实例方法的第一个参数，“cls”应是类方法的第一个参数--没有参数",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "7f5dcd046d6b11edab16fa163e0fa374",
+      "code": "G.NAM.03",
+      "name": "G.NAM.03 “self”应是实例方法的第一个参数，“cls”应是类方法的第一个参数--self",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "N805"
+      ],
+      "coverage": "检查实例方法的第一个参数名称。"
+    },
+    {
+      "id": "7fe307aa6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--iter",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "806662af6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--len",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "PLE0303"
+      ],
+      "coverage": "部分覆盖。检查 Ruff 可推断的 __len__ 非法返回值。"
+    },
+    {
+      "id": "80ea8f5f6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--bool",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "80fbb2206d6e11edab16fa163e0fa374",
+      "code": "80fbb2206d6e11edab16fa163e0fa374",
+      "name": "IP地址不能硬编码",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "81719ad76d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--index",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "PLE0305"
+      ],
+      "coverage": "部分覆盖。检查 Ruff 可推断的 __index__ 非法返回类型。"
+    },
+    {
+      "id": "81f9257c6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--repr",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "827fc7956d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--str",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "PLE0307"
+      ],
+      "coverage": "部分覆盖。检查 Ruff 可推断的 __str__ 非法返回类型。"
+    },
+    {
+      "id": "8304b24f6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--bytes",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "PLE0308"
+      ],
+      "coverage": "部分覆盖。检查 Ruff 可推断的 __bytes__ 非法返回类型。"
+    },
+    {
+      "id": "833790c46d6511edab16fa163e0fa374",
+      "code": "G.NAM.01",
+      "name": "G.NAM.01 使用统一的命名风格",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "N802"
+      ],
+      "coverage": "部分覆盖。检查函数名称，保留已记录的标准库覆盖方法例外。"
+    },
+    {
+      "id": "8388751b6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--hash",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "PLE0309"
+      ],
+      "coverage": "部分覆盖。检查 Ruff 可推断的 __hash__ 非法返回类型。"
+    },
+    {
+      "id": "8408e9db6d6511edab16fa163e0fa374",
+      "code": "G.CMT.02",
+      "name": "G.CMT.02 类的文档字符串写在类声明(class ClassName:)所在行的下一行，并向后缩进4个空格",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "840c13846d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--length_hint",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "848ed6406d6511edab16fa163e0fa374",
+      "code": "G.CMT.03",
+      "name": "G.CMT.03 公共函数的文档字符串写在函数声明(def function_name(param):)所在行的下一行，并向后缩进4个空格",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "8491e1c36d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--format",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "851353366d6511edab16fa163e0fa374",
+      "code": "G.CMT.01",
+      "name": "G.CMT.01 模块文档字符串写在文件的顶部，Shebang和文件编码声明之后，导入(imports) 部分之前的位置，不需要缩进",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "851759326d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--getnewargs",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "85975a466d6511edab16fa163e0fa374",
+      "code": "G.CTL.04",
+      "name": "G.CTL.04 建议使用 for x in iterable 的方式循环处理可迭代对象",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "859baf7e6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.09",
+      "name": "G.CLS.09 重写类的魔法函数时必须返回其原型指定的类型--getnewargs_ex",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "861c453e6d6511edab16fa163e0fa374",
+      "code": "G.FMT.07",
+      "name": "G.FMT.07 导入部分(imports)应该按照标准库、第三方库、应用程序自定义模块的顺序排列导入",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "C0411"
+      ],
+      "coverage": "检查标准库、第三方、项目模块和相对导入顺序；tool.codecheck.source-packages 提供可供静态分类的项目包名。"
+    },
+    {
+      "id": "861fff5f6d6b11edab16fa163e0fa374",
+      "code": "G.ERR.10",
+      "name": "G.ERR.10 同时使用多个except语句时，要注意异常捕获的顺序",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "B025"
+      ],
+      "coverage": "部分覆盖。检查同一 try 中重复捕获相同异常，继承关系导致的顺序问题尚未分析。"
+    },
+    {
+      "id": "86a070216d6511edab16fa163e0fa374",
+      "code": "G.FNM.01",
+      "name": "G.FNM.01 禁止使用可变对象作为参数默认值",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "B006"
+      ],
+      "coverage": "检查函数默认参数中的可变对象。"
+    },
+    {
+      "id": "86a3501c6d6b11edab16fa163e0fa374",
+      "code": "G.ERR.03",
+      "name": "G.ERR.03 异常的类型定义必须继承自Exception",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "87260fdb6d6511edab16fa163e0fa374",
+      "code": "G.ERR.02",
+      "name": "G.ERR.02 用异常来表示异常，而不是用返回值表示异常",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "87272ea66d6b11edab16fa163e0fa374",
+      "code": "G.CLS.10",
+      "name": "G.CLS.10 未实现的数值运算类型魔法函数必须返回NotImplemented而不是抛出NotImplementedError",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "87aab3f36d6b11edab16fa163e0fa374",
+      "code": "G.FNM.04",
+      "name": "G.FNM.04 不要将没有返回值的函数调用结果赋值给变量",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "87ac60f36d6511edab16fa163e0fa374",
+      "code": "G.ERR.14",
+      "name": "G.ERR.14 不要使用return、break、continue或抛出异常使finally块非正常结束",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "B012"
+      ],
+      "coverage": "部分覆盖。检查 finally 中退出当前块的 return/break/continue，raise 语义尚未分析。"
+    },
+    {
+      "id": "882ff7a96d6b11edab16fa163e0fa374",
+      "code": "G.FNM.03",
+      "name": "G.FNM.03 当函数参数个数较多且有相关性时，建议通过class/namedtuple/dataclass等具名形式进行封装",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "883246846d6511edab16fa163e0fa374",
+      "code": "G.CLS.07",
+      "name": "G.CLS.07 类的方法不需要访问实例时，建议定义为staticmethod或classmethod",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "88b380346d6b11edab16fa163e0fa374",
+      "code": "G.CTL.03",
+      "name": "G.CTL.03 避免在条件/循环控制语句中包含过多的条件",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "88b6f4536d6511edab16fa163e0fa374",
+      "code": "G.VAR.03",
+      "name": "G.VAR.03 禁止覆盖外部作用域中的标识符",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "893742aa6d6b11edab16fa163e0fa374",
+      "code": "G.FNM.05",
+      "name": "G.FNM.05 当函数返回值个数较多时，建议通过class/namedtuple/dataclass等具名形式进行封装",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "893ab3366d6511edab16fa163e0fa374",
+      "code": "G.NAM.04",
+      "name": "G.NAM.04 避免在无关的标识符或无关的概念之间重用名字， 避免因重名而导致的意外赋值和错误引用",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "89bcb0256d6b11edab16fa163e0fa374",
+      "code": "G.CTL.01",
+      "name": "G.CTL.01 同一个函数所有分支的返回值类型和个数保持一致",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "89bf44796d6511edab16fa163e0fa374",
+      "code": "G.VAR.01",
+      "name": "G.VAR.01 禁止在变量的生命周期内修改其类型",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "8a43dc7b6d6511edab16fa163e0fa374",
+      "code": "G.TYP.07",
+      "name": "G.TYP.07 使用dict[key]获取 value 时需要注意保证 key 在有效的范围内",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "8a43ebee6d6b11edab16fa163e0fa374",
+      "code": "G.CTL.02",
+      "name": "G.CTL.02 所有的代码都必须是逻辑可达的",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "8ac804726d6511edab16fa163e0fa374",
+      "code": "G.TYP.01",
+      "name": "G.TYP.01 需要精确数值计算的场景，应使用decimal模块，且不要用浮点数构造Decimal",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "RUF032"
+      ],
+      "coverage": "部分覆盖。检查 Decimal 使用浮点数字面量构造。"
+    },
+    {
+      "id": "8ac81d376d6b11edab16fa163e0fa374",
+      "code": "G.EXP.03",
+      "name": "G.EXP.03 不应将lambda表达式赋值给变量，应该使用常规函数",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "E731"
+      ],
+      "coverage": "检查将 lambda 表达式直接赋值给变量。"
+    },
+    {
+      "id": "8b4c72b66d6511edab16fa163e0fa374",
+      "code": "G.PRJ.04",
+      "name": "G.PRJ.04 建议同一项目内的编码方式保持一致，推荐使用UTF-8",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "8b50a8676d6b11edab16fa163e0fa374",
+      "code": "G.TYP.06",
+      "name": "G.TYP.06 同一个字典表达式中各个键值不要相同",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "F601",
+        "F602"
+      ],
+      "coverage": "检查字典中重复的常量键和相同变量键。"
+    },
+    {
+      "id": "8bd81bac6d6b11edab16fa163e0fa374",
+      "code": "G.TYP.02",
+      "name": "G.TYP.02 浮点型数据判断相等不要直接使用==",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "8c5c76ab6d6b11edab16fa163e0fa374",
+      "code": "G.OPR.04",
+      "name": "G.OPR.04 不建议使用海象运算符",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "G.OPR.04"
+      ],
+      "coverage": "检查海象运算符，默认提示。"
+    },
+    {
+      "id": "8ce1534f6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.08",
+      "name": "G.CLS.08 避免在__init__方法外定义类实例属性",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "W0201"
+      ],
+      "coverage": "检查实例属性首次在初始化方法之外定义；允许构造函数中的初始化及普通方法中的更新。"
+    },
+    {
+      "id": "8d65bf6b6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.11",
+      "name": "G.CLS.11 避免在类外或者子类中访问父类受保护的成员",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "W0212"
+      ],
+      "coverage": "部分覆盖。检查类外的单下划线成员访问，含参数名为 self 的模块级包装闭包；Pylint 允许继承访问。"
+    },
+    {
+      "id": "8deb1aba6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.01",
+      "name": "G.CLS.01 如果子类和父类中都有__init__方法，则子类中的__init__方法必须正确调用其父类__init__方法",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "8e6f082c6d6b11edab16fa163e0fa374",
+      "code": "G.CLS.02",
+      "name": "G.CLS.02 子类重写父类的方法时，方法签名应该和被重写的方法一致",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "8ef54f7a6d6b11edab16fa163e0fa374",
+      "code": "G.PSL.04",
+      "name": "G.PSL.04 建议用functools.wraps定义函数装饰器",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "8f7adcbf6d6b11edab16fa163e0fa374",
+      "code": "G.ERR.11",
+      "name": "G.ERR.11 避免使用SystemExit和sys.exit()，主进程入口中例外",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "900024386d6b11edab16fa163e0fa374",
+      "code": "G.PSL.01",
+      "name": "G.PSL.01 避免使用已经被标记为弃用并有明确替代的方法",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "908391266d6b11edab16fa163e0fa374",
+      "code": "G.CMT.05",
+      "name": "G.CMT.05 正式交付给客户的代码不应包含TODO/FIXME注释",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "9107364a6d6b11edab16fa163e0fa374",
+      "code": "G.VAR.02",
+      "name": "G.VAR.02 禁止使用global关键字声明不存在的外部变量",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "91e7fe1a6d6b11edab16fa163e0fa374",
+      "code": "G.FNM.02",
+      "name": "G.FNM.02 函数和lambda表达式不应该使用外部的循环代码中定义的变量",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "B023"
+      ],
+      "coverage": "检查循环中函数和 lambda 闭包引用循环变量。"
+    },
+    {
+      "id": "926d55ac6d6b11edab16fa163e0fa374",
+      "code": "G.ERR.05",
+      "name": "G.ERR.05 使用有明确业务属性的异常类型",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "92f24fb46d6b11edab16fa163e0fa374",
+      "code": "G.ERR.13",
+      "name": "G.ERR.13 捕获异常后避免直接重新抛出",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "9376de1f6d6b11edab16fa163e0fa374",
+      "code": "G.ERR.04",
+      "name": "G.ERR.04 对异常做类型转换时要保留原始异常的错误调用栈信息",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [
+        "B904"
+      ],
+      "coverage": "部分覆盖。在 except 中抛出新异常时检查显式异常链，允许 from None。"
+    },
+    {
+      "id": "93fb00756d6b11edab16fa163e0fa374",
+      "code": "G.ERR.09",
+      "name": "G.ERR.09 在单个except代码块内，禁止重复捕获同类异常",
+      "severity": "严重",
+      "language": "PYTHON",
+      "local_rules": [
+        "B014"
+      ],
+      "coverage": "检查单个 except 元组中重复的异常类型。"
+    },
+    {
+      "id": "9503826f6d6b11edab16fa163e0fa374",
+      "code": "G.FIO.05",
+      "name": "G.FIO.05 构造文件路径时应屏蔽操作系统的差异，建议使用库函数辅助构造",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "960cdec96d6b11edab16fa163e0fa374",
+      "code": "G.TES.02",
+      "name": "G.TES.02 使用对应的方法做值断言",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "96904aeb6d6b11edab16fa163e0fa374",
+      "code": "G.EXP.04",
+      "name": "G.EXP.04 推导式和生成器表达式仅用于简单的逻辑表达",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "97148a0c6d6b11edab16fa163e0fa374",
+      "code": "G.PSL.03",
+      "name": "G.PSL.03 修改sys.path时注意避免模块重名问题",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "9799596d6d6b11edab16fa163e0fa374",
+      "code": "G.NAM.02",
+      "name": "G.NAM.02 命名要有明确含义，以提升代码的可读性",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "981dd49b6d6b11edab16fa163e0fa374",
+      "code": "G.IMP.03",
+      "name": "G.IMP.03 避免使用__import__函数",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "98a1ee5b6d6b11edab16fa163e0fa374",
+      "code": "G.ERR.06",
+      "name": "G.ERR.06 raise语句必须包含异常实例",
+      "severity": "一般",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    },
+    {
+      "id": "fc527871236147968f8e742235ea707a",
+      "code": "fc527871236147968f8e742235ea707a",
+      "name": "硬编码凭证存在安全风险",
+      "severity": "致命",
+      "language": "PYTHON",
+      "local_rules": [],
+      "coverage": "待补充。需要补充规则边界、正反样例或相应检测机制。"
+    }
+  ]
+}

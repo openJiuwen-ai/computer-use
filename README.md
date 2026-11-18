@@ -135,6 +135,7 @@ pre-commit install --install-hooks
 `git commit` checks staged Python source and stub files, JSON/YAML/TOML syntax, and merge conflict markers.
 If a check blocks a commit, fix the reported issue and stage the fix before retrying.
 Run `pre-commit run --all-files` to check all tracked files manually. CI CodeCheck still determines whether a PR passes its check.
+See [local CodeCheck](docs/codecheck.md) for rule coverage, advisory checks, and exceptions.
 
 ## License
 

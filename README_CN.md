@@ -134,6 +134,7 @@ pre-commit install --install-hooks
 `git commit` 会检查暂存的 Python 源码和类型桩、JSON/YAML/TOML 语法以及合并冲突标记。
 检查发现问题时会阻止提交。按提示修复并重新暂存后再提交。
 运行 `pre-commit run --all-files` 可手动检查全部已跟踪文件。PR 门禁以 CI 的 CodeCheck 结果为准。
+本地规则的覆盖范围、提示和例外用法见 [本地 CodeCheck](docs/codecheck.md)。
 
 ## 开源许可证
 
