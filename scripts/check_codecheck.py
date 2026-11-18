@@ -38,25 +38,76 @@ def literal_number(node):
     return None
 
 
+def check_four_space_indentation(tokens):
+    """Check G.FMT.01: each code block adds exactly four spaces of indentation.
+
+    Yield line and column positions for non-four-space or tab-indented blocks.
+    Only INDENT/DEDENT tokens define blocks; continuation alignment, multiline
+    strings, blank lines and comment-only lines are outside this check's scope.
+    """
+    widths = [0]
+    for token in tokens:
+        if token.type == tokenize.INDENT:
+            width = len(token.string)
+            if token.string.strip(" ") or width - widths[-1] != 4:
+                yield token.start[0], 1
+            widths.append(width)
+        elif token.type == tokenize.DEDENT:
+            widths.pop()
+
+
+def check_mixed_line_endings(data):
+    """Check G.FMT.10: report the first mixed LF/CRLF ending within one file."""
+    first_ending = None
+    for line, content in enumerate(data.splitlines(keepends=True), 1):
+        ending = "CRLF" if content.endswith(b"\r\n") else "LF" if content.endswith(b"\n") else None
+        if ending and first_ending and ending != first_ending:
+            yield line, 1
+            return
+        first_ending = first_ending or ending
+
+
+def check_assignment_expression(node):
+    """Check G.OPR.04: find assignment expressions (:=), advisory by default."""
+    if isinstance(node, ast.NamedExpr):
+        return "G.OPR.04", node
+    return None
+
+
+def check_negative_slice_step(node):
+    """Check G.TYP.05: find literal negative slice steps without inferring variables."""
+    if isinstance(node, ast.Slice):
+        step = literal_number(node.step)
+        if isinstance(step, (int, float)) and step < 0:
+            return "G.TYP.05", node.step
+    return None
+
+
+def check_zero_divisor(node):
+    """Check G.OPR.01: find /, // or % with numeric literals and a zero divisor.
+
+    Dynamic operand types, augmented assignments and cross-function protection
+    remain unchecked. String formatting and overloaded operators are preserved.
+    """
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
+        if literal_number(node.left) is not None and literal_number(node.right) == 0:
+            return "G.OPR.01", node.right
+    return None
+
+
 def custom_findings(data: bytes, filename: str):
-    """Find four CI rule patterns through AST and token inspection.
+    """Combine named local checks with same-line, per-rule suppression.
 
-    CI rules:
-        G.OPR.01: /, // or % with two numeric literals and a zero divisor.
-        G.TYP.05: a literal negative slice step.
-        G.OPR.04: an assignment expression (:=).
-        G.FMT.10: mixed LF and CRLF endings within one file.
-
-    Source code is never evaluated; dynamic operand types remain unchecked.
-    Same-line ``# codecheck: ignore[<rule>]`` comments suppress only that rule.
-    Advisory versus blocking behavior is applied by check_files.
+    Source code is parsed without evaluation. Ruff reports parse errors;
+    check_files applies advisory versus blocking behavior to the findings.
     """
     ignored = {}
     try:
         encoding, _ = tokenize.detect_encoding(io.BytesIO(data).readline)
         source = data.decode(encoding)
         tree = ast.parse(source, filename=filename)
-        for token in tokenize.tokenize(io.BytesIO(data).readline):
+        tokens = list(tokenize.tokenize(io.BytesIO(data).readline))
+        for token in tokens:
             if token.type == tokenize.COMMENT:
                 match = IGNORE.match(token.string)
                 if match:
@@ -71,29 +122,18 @@ def custom_findings(data: bytes, filename: str):
         if code not in ignored.get(line, ()):
             findings.append({"filename": filename, "line": line, "column": column, "code": code})
 
-    first_ending = None
-    for line, content in enumerate(data.splitlines(keepends=True), 1):
-        ending = "CRLF" if content.endswith(b"\r\n") else "LF" if content.endswith(b"\n") else None
-        if ending and first_ending and ending != first_ending:
-            emit("G.FMT.10", line, 1)
-            break
-        first_ending = first_ending or ending
+    for line, column in check_four_space_indentation(tokens):
+        emit("G.FMT.01", line, column)
+    for line, column in check_mixed_line_endings(data):
+        emit("G.FMT.10", line, column)
 
     lines = source.splitlines()
     for node in ast.walk(tree):
-        code = None
-        location = node
-        if isinstance(node, ast.NamedExpr):
-            code = "G.OPR.04"
-        elif isinstance(node, ast.Slice):
-            step = literal_number(node.step)
-            if isinstance(step, (int, float)) and step < 0:
-                code, location = "G.TYP.05", node.step
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)):
-            # The % operator also formats strings; unknown operand types remain unchecked.
-            if literal_number(node.left) is not None and literal_number(node.right) == 0:
-                code, location = "G.OPR.01", node.right
-        if code:
+        for check in (check_assignment_expression, check_negative_slice_step, check_zero_divisor):
+            finding = check(node)
+            if finding is None:
+                continue
+            code, location = finding
             # AST columns are UTF-8 byte offsets; diagnostics use character columns.
             prefix = lines[location.lineno - 1].encode("utf-8")[: location.col_offset].decode("utf-8")
             emit(code, location.lineno, len(prefix) + 1)
