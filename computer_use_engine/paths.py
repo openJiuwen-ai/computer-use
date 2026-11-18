@@ -247,12 +247,8 @@ def repository_root():
 
 def native_driver(platform=None, root=None):
     platform = platform or sys.platform
-    if (
-        root is None
-        and platform == sys.platform == "win32"
-        and getattr(sys, "frozen", False)
-        and checkout_root() is None
-    ):
+    check_frozen_windows_bundle = root is None and platform == sys.platform == "win32" and getattr(sys, "frozen", False)
+    if check_frozen_windows_bundle and checkout_root() is None:
         assets = Path(__file__).parent / "_resources"
         bundled = _windows_bundled_driver(assets, app_directory=Path(sys.executable).parent)
         if bundled is not None:
