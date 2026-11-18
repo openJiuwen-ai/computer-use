@@ -3,7 +3,8 @@
 """Check Python files against locally implemented MR rules and configured tools.
 
 Checker docstrings identify CI rules and implementation boundaries. The full
-rule inventory and tool mappings are maintained in codecheck_rules.json.
+rule inventory, tool mappings and custom diagnostic messages are maintained in
+codecheck_rules.json.
 """
 
 import argparse
@@ -23,12 +24,6 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "pyproject.toml"
 CATALOG = Path(__file__).with_name("codecheck_rules.json")
-CUSTOM_RULES = {
-    "G.OPR.01": "字面量零不能作为数值运算的除数或模数。",
-    "G.TYP.05": "切片使用了字面量负步长，请确认是否需要反向遍历。",
-    "G.OPR.04": "使用了海象运算符，请确认是否需要在表达式中赋值。",
-    "G.FMT.10": "同一文件混用了 LF 和 CRLF 换行符。",
-}
 IGNORE = re.compile(r"^#\s*codecheck:\s*ignore\[([^\]]+)\]")
 
 
@@ -223,11 +218,13 @@ def check_files(files, rules, settings, strict):
     """Combine read-only Ruff, custom, Pylint and pycodestyle diagnostics.
 
     Ruff rule selection lives in pyproject.toml; its CI mappings and partial
-    coverage are recorded in codecheck_rules.json. Custom G.TYP.05 and G.OPR.04
-    are advisory by default through settings['advisory']; strict makes them block.
+    coverage and custom diagnostic messages are recorded in codecheck_rules.json.
+    Custom G.TYP.05 and G.OPR.04 are advisory by default through
+    settings['advisory']; strict makes them block.
     Ruff and custom checks accept .py and .pyi; the other tools receive .py only.
     Return 0 for success, 1 for blocking findings, or 2 for an incomplete check.
     """
+    messages = {rule["code"]: rule["message"] for rule in rules if "message" in rule}
     paths = [str(Path(name).resolve()) for name in files]
     result = subprocess.run(
         [*ruff_command("--no-fix", "--output-format=json"), "--", *paths],
@@ -283,7 +280,7 @@ def check_files(files, rules, settings, strict):
             code = item["code"]
             warning = code in settings["advisory"] and not strict
             level = "提示" if warning else "错误"
-            sys.stdout.write(f"{filename}:{item['line']}:{item['column']}: {code} [{level}] {CUSTOM_RULES[code]}\n")
+            sys.stdout.write(f"{filename}:{item['line']}:{item['column']}: {code} [{level}] {messages[code]}\n")
             if not warning:
                 status = 1
     status = max(status, pylint_checks(sources, rules, settings))
