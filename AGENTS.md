@@ -48,7 +48,7 @@ SDK 保持单一执行主干，接入层复用能力。Pipeline 显式组合，P
 - `uv run --no-dev computer-use-build`：构建或准备本机驱动。
 - `uv run pytest tests/unit_tests`：运行 Python 单元测试。
 - `uv run ruff check .`：静态检查；格式遵循 Ruff 配置，行宽 120。
-- 使用 `pre-commit run --all-files` 运行本地提交检查，包括 Ruff、配置文件语法和合并冲突标记。安装方法见 README 的参与贡献章节。
+- 使用 `pre-commit run --all-files` 运行本地提交检查，包括 Ruff、配置文件语法和合并冲突标记。安装方法见 [本地 CodeCheck](docs/codecheck.md#运行)。
 
 **修复必须附带最小回归测试。** 对于已发现的问题，修复时必须同步构建能复现原问题的最小回归测试，确认修复前失败、修复后通过，以固定修复后的预期行为并防止问题再次出现。
 

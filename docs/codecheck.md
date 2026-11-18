@@ -145,7 +145,14 @@
 
 ## 运行
 
-安装方式见 [参与贡献](../README_CN.md#参与贡献)。`git commit` 自动检查暂存文件，也可手动运行。
+每个克隆在仓库根目录安装一次本地提交检查。检查工具使用独立环境，无需构建 SDK。
+
+```sh
+uv tool install --python 3.12 "pre-commit==4.6.0"
+pre-commit install --install-hooks
+```
+
+`git commit` 自动检查暂存文件；遇到拦截项时，修复并重新暂存后再提交。也可手动运行：
 
 ```sh
 pre-commit run codecheck --all-files
