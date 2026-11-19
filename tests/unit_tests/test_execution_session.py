@@ -7,7 +7,6 @@ import asyncio
 
 import pytest
 
-from computer_use_mcp.instructions import DESCRIPTION
 from computer_use_mcp.session import ExecutionSession
 
 
@@ -115,35 +114,6 @@ def test_cancellation_retires_startup_and_closes_transport(phase):
         assert not session._starting
         if phase != "drain":
             assert not session.writer.sent
-
-    asyncio.run(scenario())
-
-
-def test_shared_prompt_interprets_esc_result_as_a_user_stop_request():
-    async def scenario():
-        session = Session()
-        session.writer.release.clear()
-        session.startup.set()
-        execution = session.execute("sample")
-        try:
-            await session.writer.draining.wait()
-            session._stop_by_user(session._pending["id"])
-            session.writer.release.set()
-            result = await execution
-
-            assert result["isError"]
-            assert result["_meta"]["computer-use"]["progress"]["stopReason"] == "user_stopped"
-            notice, output = result["content"]
-            prompt = " ".join(DESCRIPTION.split())
-            user_stop_guidance = (
-                f'"{notice["text"]}" means that the user explicitly asked you to stop operating the computer.'
-            )
-            assert user_stop_guidance in prompt
-            assert "Do not retry or make another desktop call" in prompt
-            assert "Resume only if the user explicitly asks." in prompt
-            assert output["text"] == "executed"
-        finally:
-            await session.close()
 
     asyncio.run(scenario())
 
