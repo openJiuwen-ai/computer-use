@@ -23,6 +23,8 @@ Get-Command link.exe
 Test-Path "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 ```
 
+**Windows OCR（可选）。** 视觉引用依赖 Windows 自带 OCR。设置 `COMPUTER_USE_WINDOWS_OCR=1`，并在“设置 → 时间和语言 → 语言和区域 → 语言功能”中为识别语言安装 OCR。MCP/DeepAgent 会透传该变量；自定义宿主也可以用 `McpConfig.env` 显式传入。
+
 **Linux。** 以下命令适用于 Debian 13。其他发行版请安装对应的软件包，并运行下方的 AT-SPI 检查。
 
 ```sh

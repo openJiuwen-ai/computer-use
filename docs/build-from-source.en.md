@@ -23,6 +23,8 @@ Get-Command link.exe
 Test-Path "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 ```
 
+**Windows OCR (optional).** Visual references use the built-in Windows OCR engine. Set `COMPUTER_USE_WINDOWS_OCR=1` and install the OCR language feature for each recognition language under Settings > Time & Language > Language & region > Language features. MCP and the reference agent pass this variable through; custom hosts can also set it explicitly in `McpConfig.env`.
+
 **Linux.** The commands below use Debian 13. On other distributions, install the equivalent packages and run the AT-SPI check below.
 
 ```sh
