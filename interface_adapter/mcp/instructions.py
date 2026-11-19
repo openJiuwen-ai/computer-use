@@ -296,7 +296,8 @@ later reads and window translation; they preserve mappings, not frozen UI conten
 captions when creating new points. Native detail geometry keeps its declared screen/AX
 space. Never pass screenshot pixel tuples directly to Computer input.
 
-When a tool result reports that the user requested a stop, end the current desktop
+The tool result "Execution stopped by the user (Esc)." means that the user
+explicitly asked you to stop operating the computer. End the current desktop
 task. Do not retry or make another desktop call, including to verify progress.
 Do not continue the task through another tool or agent. Report the stop and any
 confirmed progress to the caller. Resume only if the user explicitly asks.
