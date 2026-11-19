@@ -1,0 +1,41 @@
+minimum_pre_commit_version: "4.0.0"
+default_stages: [pre-commit]
+repos:
+  - repo: local
+    hooks:
+      - id: codecheck
+        name: Python CodeCheck preflight
+        entry: python -I scripts/check_codecheck.py
+        language: python
+        additional_dependencies:
+          - ruff==0.15.15
+          - pylint==3.3.9
+          - astroid==3.3.11
+          - isort==6.1.0
+          - pycodestyle==2.14.0
+        types_or: [python, pyi]
+        verbose: true
+      - id: check-json
+        name: Check JSON syntax
+        entry: check-json
+        language: python
+        additional_dependencies: &file_checks [pre-commit-hooks==6.0.0]
+        types: [json]
+      - id: check-yaml
+        name: Check YAML syntax
+        entry: check-yaml --allow-multiple-documents
+        language: python
+        additional_dependencies: *file_checks
+        types: [yaml]
+      - id: check-toml
+        name: Check TOML syntax
+        entry: check-toml
+        language: python
+        additional_dependencies: *file_checks
+        types: [toml]
+      - id: check-merge-conflict
+        name: Check for merge conflict markers
+        entry: check-merge-conflict --assume-in-merge
+        language: python
+        additional_dependencies: *file_checks
+        types: [text]

@@ -290,18 +290,20 @@ class BuildReadEngine(build_ext):
             json.dumps({"reason": reason}, separators=(",", ":")), encoding="utf-8",
         )
         # Setuptools must not copy a missing binary during an editable install.
-        self.extensions = []
+        self.extensions = []  # pylint: disable=attribute-defined-outside-init
         _LOG.warning("Rust accessibility engine unavailable (%s). Installing the Python SDK.", reason)
 
 
 class BackendWheel(bdist_wheel):
     def finalize_options(self):
+        # Setuptools command options are initialized by this lifecycle callback.
+        # pylint: disable-next=attribute-defined-outside-init
         self.native_platform = None if BACKEND_ARCHIVE or BACKEND_DIR else native_platform()
         platform_tag = ENGINE_TAG[2] if ENGINE_TAG else self.native_platform
         if platform_tag:
             if self.plat_name not in (None, platform_tag):
                 raise ValueError(f"The native build requires wheel platform {platform_tag}.")
-            self.plat_name = platform_tag
+            self.plat_name = platform_tag  # pylint: disable=attribute-defined-outside-init
         super().finalize_options()
 
     def run(self):
