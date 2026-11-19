@@ -118,6 +118,31 @@ def test_cancellation_retires_startup_and_closes_transport(phase):
     asyncio.run(scenario())
 
 
+def test_esc_result_tells_the_agent_to_end_the_desktop_task():
+    async def scenario():
+        session = Session()
+        session.writer.release.clear()
+        session.startup.set()
+        execution = session.execute("sample")
+        try:
+            await session.writer.draining.wait()
+            session._stop_by_user(session._pending["id"])
+            session.writer.release.set()
+            result = await execution
+
+            assert result["isError"]
+            assert result["_meta"]["computer-use"]["progress"]["stopReason"] == "user_stopped"
+            notice, output = result["content"]
+            assert "The user requested that you stop operating the computer." in notice["text"]
+            assert "Do not retry" in notice["text"]
+            assert "Resume only if the user explicitly asks." in notice["text"]
+            assert output["text"] == "executed"
+        finally:
+            await session.close()
+
+    asyncio.run(scenario())
+
+
 def test_execution_requested_during_reset_waits_for_cleanup():
     async def scenario():
         session = Session()

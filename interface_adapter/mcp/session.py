@@ -28,7 +28,11 @@ from .worker_transport import (
 CLEANUP_TIMEOUT_SECONDS = 5
 
 RESET_NOTICE = "Execution session cleared. Python variables and handles cleared."
-USER_STOP_NOTICE = "Execution stopped by the user (Esc)."
+USER_STOP_NOTICE = (
+    "Execution stopped by the user (Esc). The user requested that you stop operating the computer. "
+    "End the current desktop task now. Do not retry, make more desktop calls, or delegate the task again. "
+    "Report the stop and any confirmed progress. Resume only if the user explicitly asks."
+)
 
 _LOG = logging.getLogger(__name__)
 

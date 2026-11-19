@@ -296,6 +296,11 @@ later reads and window translation; they preserve mappings, not frozen UI conten
 captions when creating new points. Native detail geometry keeps its declared screen/AX
 space. Never pass screenshot pixel tuples directly to Computer input.
 
+When a tool result reports that the user requested a stop, end the current desktop
+task. Do not retry or make another desktop call, including to verify progress.
+Do not continue the task through another tool or agent. Report the stop and any
+confirmed progress to the caller. Resume only if the user explicitly asks.
+
 dispatched means sent; verified identifies only the stated local check. Determine task
 completion from observed results. On failure, use execution progress and any retained
 receipt/observation to identify completed and remaining work. Correct invalid arguments
@@ -306,8 +311,8 @@ help described in the result. Pause that step instead of repeating it or trying 
 input methods under the same restriction. After the user helps, read the target again
 and check completed effects before continuing. Do not infer a permission problem from
 ordinary input failures or read timeouts.
-Timeout/cancellation clears Python state. The next call starts fresh; applications,
-files and completed effects persist.
+Timeout/cancellation clears Python state. If the task may continue, the next call
+starts fresh; applications, files and completed effects persist.
 
 ## Using the API
 
