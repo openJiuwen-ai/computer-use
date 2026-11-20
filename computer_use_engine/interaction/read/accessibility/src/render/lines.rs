@@ -7,6 +7,7 @@ use std::ops::Range;
 
 use unicode_segmentation::UnicodeSegmentation;
 
+use super::super::delivery_budget::DeliveryBudget;
 use super::super::line_layout::{
     python_alphanumeric, python_space, ActionCatalogue, ChildCoverageHint, EmptyValueLine, LayoutNode, TextPartLine,
     UnexpandedMenuSummary,
@@ -1078,7 +1079,7 @@ fn node_line(
     let name = node.text("name").filter(|value| !value.is_empty());
     let description = node.text("description").filter(|value| !value.is_empty());
     let mut captions = Vec::new();
-    let caption = name.map_or(Ok(String::new()), |name| {
+    let caption = name.map_or(Ok::<_, TextError>(String::new()), |name| {
         let rendered = claims.caption(node, "name", name, options.compact);
         let full = !options.compact || compact_embedded(name).is_none();
         capture_caption(&mut captions, node, "name", &rendered, full, options);
@@ -2007,11 +2008,13 @@ impl<'a> Visitor<'a> {
         })
     }
 
-    fn visit(&mut self, root: NodeId) -> Result<LayoutNode> {
+    fn visit(&mut self, root: NodeId, budget: &mut DeliveryBudget<'_>) -> Result<LayoutNode> {
+        budget.step()?;
         let mut pending = vec![self.enter(root, 0, None, None, false, Vec::new())?];
         loop {
             let parent = pending.last_mut().expect("render root remains on the stack");
             if let Some(&child) = parent.source.children.get(parent.next_child) {
+                budget.step()?;
                 // Emit the heading at entry, between the previous sibling and this child.
                 parent.next_child += 1;
                 let child_node = self.projection.node(child).ok_or(TextError::Invalid("rendered child"))?;
@@ -2045,6 +2048,7 @@ impl<'a> Visitor<'a> {
 pub(crate) fn render_projection(
     projection: &Projection,
     options: &LineOptions<'_>,
+    budget: &mut DeliveryBudget<'_>,
 ) -> Result<LineSeed> {
     let visible = projection
         .visible_order()
@@ -2053,6 +2057,7 @@ pub(crate) fn render_projection(
     let mut coordinates = false;
     if options.compact && options.subtree.is_none() {
         for node in visible.iter().filter_map(|id| projection.node(*id)) {
+            budget.step()?;
             if let Some(index) = node.num("index") {
                 indices.insert(index);
             }
@@ -2083,7 +2088,7 @@ pub(crate) fn render_projection(
     }
     let tree_start = visitor.seed.lines.len();
     for root in &projection.roots {
-        let layout = visitor.visit(*root)?;
+        let layout = visitor.visit(*root, budget)?;
         visitor.seed.roots.push(layout);
     }
     let tree_end = visitor.seed.lines.len();
@@ -2092,6 +2097,7 @@ pub(crate) fn render_projection(
     } = visitor;
     seed.claims = claims.entries;
     for node in &mut seed.section.nodes {
+        budget.step()?;
         node.related = summary.context.remove(&node.reference).unwrap_or_default();
     }
     if !summary.collapsed_menus.is_empty() {

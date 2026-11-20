@@ -348,9 +348,8 @@ class WorkerMessageWriter:
         key = (call, path, phase, effects, attempt, type(branch), branch, cleanup, dispatch, error, execution_id)
         templates = self._pipeline_templates
         template = templates.get(key)
-        # Pipeline diagnostics used to stamp each event when its callback ran.
-        # Preserve that clock boundary for buffered native stages as well.
-        timestamp = _pipeline_timestamp()
+        # Native stages may be buffered before their Python callback runs.
+        timestamp = _pipeline_timestamp() if event.timestamp is None else event.timestamp
         if template is None:
             message = _pipeline_message(event, timestamp, execution_id)
             frame = _encode_message(message, self.protocol, canonical_pipeline=True)

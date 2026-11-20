@@ -13,9 +13,9 @@ use crate::{
     capture::PreparedCapture,
     compact::{CompactBranch, CompactRoot},
     content::MemberMode,
+    delivery_budget::DeliveryBudget,
     disclosure::groups::GroupKind,
     geometric::{BlockId, GeometricPlan},
-    geometry::outside_window_fields,
     numbering::NodeId,
     render::atoms::{ClaimKind, Placement},
 };
@@ -52,7 +52,7 @@ fn keys(interface: &GeometricPlan, ids: &[BlockId]) -> Result<Value> {
     Ok(Value::Seq(ids.iter().map(|id| block_key(interface, *id).map(string)).collect::<Result<_>>()?))
 }
 
-fn block_signatures(root: &CompactRoot, out: &mut HashMap<String, Digest>) -> Result<()> {
+fn block_signatures(root: &CompactRoot, out: &mut HashMap<String, Digest>, budget: &mut DeliveryBudget<'_>) -> Result<()> {
     enum Visit { Enter(BlockId), Exit(BlockId) }
     let interface = &root.interface;
     let projection = &root.projection;
@@ -69,6 +69,7 @@ fn block_signatures(root: &CompactRoot, out: &mut HashMap<String, Digest>) -> Re
                 continue;
             }
         };
+        budget.step()?;
         if !active.insert(id) { return Err(InvalidPreparedComparison::Evidence("cyclic comparison layout")); }
         let block = interface.block(id).ok_or(InvalidPreparedComparison::Evidence("comparison layout block"))?;
         let member_roles = block.member_roles.iter().map(|(id, role)| Ok(Value::Seq(vec![
@@ -118,8 +119,9 @@ fn block_signatures(root: &CompactRoot, out: &mut HashMap<String, Digest>) -> Re
     Ok(())
 }
 
-fn readable_signatures(root: &CompactRoot, out: &mut HashMap<String, Value>) -> Result<()> {
+fn readable_signatures(root: &CompactRoot, out: &mut HashMap<String, Value>, budget: &mut DeliveryBudget<'_>) -> Result<()> {
     for (id, style) in &root.readable.nodes {
+        budget.step()?;
         let projection = &root.projection;
         let style = Value::Seq(vec![
             Value::Seq(style.note_slots.iter().map(|key| string(key)).collect()),
@@ -144,9 +146,10 @@ fn readable_signatures(root: &CompactRoot, out: &mut HashMap<String, Value>) -> 
     Ok(())
 }
 
-fn group_signatures(root: &CompactRoot, out: &mut HashMap<String, Value>) -> Result<()> {
+fn group_signatures(root: &CompactRoot, out: &mut HashMap<String, Value>, budget: &mut DeliveryBudget<'_>) -> Result<()> {
     let projection = &root.projection;
     for group in &root.groups.groups {
+        budget.step()?;
         let fragments = group.head.iter().chain(&group.tail).map(|part| Ok(Value::Seq(vec![
             string(reference(projection, part.source.source)?), string(&part.source.attribute),
             number(part.start), number(part.end),
@@ -184,8 +187,9 @@ fn group_signatures(root: &CompactRoot, out: &mut HashMap<String, Value>) -> Res
     Ok(())
 }
 
-fn field_signatures(root: &CompactRoot, out: &mut HashMap<String, Value>) -> Result<()> {
+fn field_signatures(root: &CompactRoot, out: &mut HashMap<String, Value>, budget: &mut DeliveryBudget<'_>) -> Result<()> {
     for field in &root.fields.fields {
+        budget.step()?;
         let target = reference(&root.projection, field.target)?;
         let slots = field.slots.iter().map(|slot| Value::Seq(vec![
             string(&slot.key), slot.label.map_or(Value::Null, string), slot.value.clone(), string(slot.format.name()),
@@ -193,6 +197,7 @@ fn field_signatures(root: &CompactRoot, out: &mut HashMap<String, Value>) -> Res
         ])).collect();
         out.insert(target.to_owned(), Value::Seq(slots));
         for member in &field.members {
+            budget.step()?;
             let mode = match member.mode {
                 MemberMode::Complete => "complete",
                 MemberMode::ActionSource => "action-source",
@@ -214,6 +219,7 @@ pub(crate) fn prepare_compact_comparison(
     indent: i64,
     capture: &PreparedCapture,
     roots: &[CompactBranch],
+    budget: &mut DeliveryBudget<'_>,
 ) -> Result<CurrentTree> {
     if roots.len() != capture.branches.len() {
         return Err(InvalidPreparedComparison::Evidence("comparison root inventory"));
@@ -240,19 +246,18 @@ pub(crate) fn prepare_compact_comparison(
         evidence.versions.insert(reference_id.to_owned(), version);
         let Some(root) = projected else { continue };
         let projection = &root.projection;
-        block_signatures(root, &mut evidence.layouts)?;
-        readable_signatures(root, &mut evidence.readable_layouts)?;
-        group_signatures(root, &mut evidence.group_layouts)?;
-        field_signatures(root, &mut evidence.field_layouts)?;
+        block_signatures(root, &mut evidence.layouts, budget)?;
+        readable_signatures(root, &mut evidence.readable_layouts, budget)?;
+        group_signatures(root, &mut evidence.group_layouts, budget)?;
+        field_signatures(root, &mut evidence.field_layouts, budget)?;
+        for &id in &root.outside_window_fields {
+            evidence.outside.insert(reference(projection, id)?.to_owned());
+        }
         let options = &projection.options;
         if options.compact && options.public_api && options.share_descriptions {
-            if capture.semantic.get("scope_kind").and_then(Value::as_str) == Some("window") {
-                for id in outside_window_fields(&snapshot.observation, &capture.geometry, projection.root) {
-                    if let Some(node) = projection.node(id) { evidence.outside.insert(node.reference.clone()); }
-                }
-            }
             let inactive = inactive.as_ref().expect("inactive proof requested for compact root");
             for atom in root.atoms.atoms.values() {
+                budget.step()?;
                 if let Some(interval) = inactive.get(&atom.reference) {
                     if atom.claims.iter().any(|claim| {
                         claim.kind == ClaimKind::TextSelectionSummary && claim.fact.attribute == "selectionRange"
@@ -264,7 +269,7 @@ pub(crate) fn prepare_compact_comparison(
             }
         }
     }
-    compare_rows(scope, options, indent, &capture.semantic, &snapshot.facts, &comparison_roots, evidence, inactive.as_ref())
+    compare_rows(scope, options, indent, &capture.semantic, &snapshot.facts, &comparison_roots, evidence, inactive.as_ref(), budget)
 }
 
 #[cfg(test)]
@@ -304,11 +309,11 @@ mod tests {
         let mut from_records = HashMap::new();
         super::super::layout_signatures(&interface, &mut from_records).unwrap();
         let mut from_typed = HashMap::new();
-        block_signatures(root, &mut from_typed).unwrap();
+        block_signatures(root, &mut from_typed, &mut Default::default()).unwrap();
         assert_eq!(from_typed, from_records);
 
         let options = DisplayOptions { compact: true, public_api: true, details: false };
-        let current = compact.comparison(vec![Some("window-surface".to_owned())], options, 2).unwrap();
+        let current = compact.comparison(vec![Some("window-surface".to_owned())], options, 2, &mut Default::default()).unwrap();
         assert_eq!(current.comparison.nodes.len(), 1);
         assert_eq!(current.comparison.nodes[0].depth, 2);
         assert_eq!(current.roots[0].members, ["0"]);
@@ -330,7 +335,7 @@ mod tests {
                 stage: FailureStage::Preparation,
             },
         });
-        let fallback = compact.comparison(vec![Some("window-surface".to_owned())], options, 2).unwrap();
+        let fallback = compact.comparison(vec![Some("window-surface".to_owned())], options, 2, &mut Default::default()).unwrap();
         assert!(fallback.comparison.failed);
         assert_eq!(fallback.comparison.versions.get("0"), Some(&None));
         assert_eq!(fallback.roots[0].members, ["0"]);

@@ -8,6 +8,7 @@ mod capture;
 mod collections;
 mod compact;
 mod content;
+mod delivery_budget;
 mod dense;
 mod diff;
 mod disclosure;

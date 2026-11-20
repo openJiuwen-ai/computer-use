@@ -4,6 +4,8 @@
 
 use std::collections::HashSet;
 
+use crate::delivery_budget::DeliveryBudget;
+
 use super::{
     accounting::{self, AccountingPart, AccountingRequest},
     capture::PreparedCapture,
@@ -78,7 +80,7 @@ impl LegacySnapshot {
     }
 
     pub(crate) fn comparison(
-        &self, scope: Scope, options: DisplayOptions, indent: i64,
+        &self, scope: Scope, options: DisplayOptions, indent: i64, budget: &mut DeliveryBudget<'_>,
     ) -> std::result::Result<CurrentTree, InvalidPreparedComparison> {
         let missing = || InvalidPreparedComparison::Evidence("legacy comparison root inventory");
         let outside = HashSet::new();
@@ -87,17 +89,17 @@ impl LegacySnapshot {
         }).collect::<std::result::Result<Vec<_>, _>>()?;
         let roots = self.capture.branches.iter().zip(&members).map(|(branch, members)| {
             let reference = branch.reference().ok_or_else(missing)?;
-            Ok(PreparedRoot {
+            Ok::<_, InvalidPreparedComparison>(PreparedRoot {
                 reference, members, projection: branch.projection.as_deref().ok(), interface: None,
                 readable: None, groups: None, fields: None, atoms: None, outside_window_fields: &outside,
             })
         }).collect::<std::result::Result<Vec<_>, _>>()?;
         diff::prepare_comparison_tree(
-            scope, options, indent, &self.capture.semantic, &self.capture.capture.snapshot.facts, &roots, None,
+            scope, options, indent, &self.capture.semantic, &self.capture.capture.snapshot.facts, &roots, None, budget,
         )
     }
 
-    fn render_root(&self, root: &Projection) -> Result<LegacyRoot> {
+    fn render_root(&self, root: &Projection, budget: &mut DeliveryBudget<'_>) -> Result<LegacyRoot> {
         let capture = &self.capture.capture;
         let snapshot = &capture.snapshot;
         let semantic = &self.capture.semantic;
@@ -118,7 +120,7 @@ impl LegacySnapshot {
             summarized_selections: Some(&summarized),
             compression_evidence: options.compact.then_some(&self.capture.evidence),
             ..LineOptions::default()
-        })?;
+        }, budget)?;
         line_inputs::populate_seed(&mut seed, root, focused);
         let empty_values = std::mem::take(&mut seed.empty_value_slots);
         line_inputs::populate_empty_values(&mut seed, root, focused, &empty_values);
@@ -162,7 +164,9 @@ impl LegacySnapshot {
         Ok(LegacyRoot { section, claims: Some(claims), deferred_urls, published_columns: packed.published_table_columns })
     }
 
-    fn fallback_root(&self, members: &[String], failure: &PresentationFailure) -> Result<LegacyRoot> {
+    fn fallback_root(
+        &self, members: &[String], failure: &PresentationFailure, budget: &mut DeliveryBudget<'_>,
+    ) -> Result<LegacyRoot> {
         let capture = &self.capture.capture;
         let snapshot = &capture.snapshot;
         let source = DetailSource::new(
@@ -171,34 +175,35 @@ impl LegacySnapshot {
             entries(self.capture.semantic.get("refs")).iter()
                 .filter_map(|(reference, token)| token.as_str().map(|token| (reference.as_str(), token))),
         )?;
-        let rendered = fallback::render(&source, members, failure)?;
+        let rendered = fallback::render(&source, members, failure, budget)?;
         Ok(LegacyRoot {
             section: rendered.section, claims: None, deferred_urls: Vec::new(), published_columns: Vec::new(),
         })
     }
 
-    pub(crate) fn render(&self, details: bool) -> Result<RenderedSnapshot> {
+    pub(crate) fn render(&self, details: bool, budget: &mut DeliveryBudget<'_>) -> Result<RenderedSnapshot> {
         let capture = &self.capture.capture;
         let semantic = &self.capture.semantic;
         let options = self.options();
         let mut roots = Vec::with_capacity(self.capture.branches.len());
         for branch in &self.capture.branches {
+            budget.step()?;
             let root = match &branch.projection {
-                Err(failure) => self.fallback_root(&failure.references, &failure.failure)?,
-                Ok(projection) => match self.render_root(projection) {
+                Err(failure) => self.fallback_root(&failure.references, &failure.failure, budget)?,
+                Ok(projection) => match self.render_root(projection, budget) {
                     Ok(root) => root,
                     Err(error) => {
                         let (error, detail) = match error {
                             TextError::Invalid("nonfinite literal") => ("ValueError", "Out of range float values are not JSON compliant"),
                             TextError::Unsupported("binary JSON value") => ("TypeError", "Cannot serialize bytes"),
                             TextError::Invalid(detail) => ("ValueError", detail),
-                            error @ TextError::Unsupported(_) => return Err(error),
+                            error @ (TextError::Unsupported(_) | TextError::Interrupted) => return Err(error),
                         };
                         let failure = PresentationFailure {
                             error, detail: detail.to_owned(), stage: FailureStage::Terminal,
                         };
                         let members = branch.member_refs().map_err(|_| TextError::Invalid("legacy source members"))?;
-                        self.fallback_root(&members, &failure)?
+                        self.fallback_root(&members, &failure, budget)?
                     }
                 },
             };
@@ -296,7 +301,7 @@ mod tests {
             let capture = capture.prepare(&aliases, ProjectionOptions {
                 compact, public_api: true, share_descriptions: false, ..Default::default()
             }).unwrap();
-            let rendered = LegacySnapshot::new(capture).render(true).unwrap();
+            let rendered = LegacySnapshot::new(capture).render(true, &mut DeliveryBudget::default()).unwrap();
             let plain = "0 image Description: 画面, Secondary Actions: <unavailable>";
             if compact {
                 assert_eq!(rendered.text(), plain);

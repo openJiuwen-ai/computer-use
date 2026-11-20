@@ -688,8 +688,10 @@ fn decode_utf16(value: &[u8]) -> WireResult<String> {
         return Err(WireError::Invalid("driver observation: invalid UTF-16 bytes"));
     }
     let words = value.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]]));
-    std::char::decode_utf16(words).collect::<Result<String, _>>()
-        .map_err(|_| WireError::Unsupported("unpaired UTF-16 surrogate"))
+    // Providers can return isolated UTF-16 units in a captured property. Keep
+    // their positions in display text, and keep the original units in the wire
+    // diagnostics. A malformed property must not discard unrelated UI evidence.
+    Ok(std::char::decode_utf16(words).map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER)).collect())
 }
 
 #[cfg(test)]
@@ -789,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn isolated_surrogate_in_original_cfstring_is_reported_without_replacing_it() {
+    fn utf16_provider_values_keep_display_positions_and_diagnostic_bytes() {
         let raw = observation();
         let mut wire = WireValues::new(&raw, false).unwrap();
         // Matches AXNativeValueEncoding.string: a repaired preview plus the
@@ -800,13 +802,23 @@ mod tests {
         }"#).unwrap();
         assert_eq!(
             wire.value(&input, 0),
-            Err(WireError::Unsupported("unpaired UTF-16 surrogate"))
+            Ok(Value::Text("A\u{fffd}B".to_owned()))
         );
+        assert_eq!(input.get("raw").and_then(Value::as_str), Some("QQAA2EIA"));
+        let bstr = decode_json(br#"{
+            "nativeType":"BSTR","data":{"bytes":"QQAA3EIA"},
+            "metadata":[["string_encoding",{"nativeType":"BSTR","data":"utf-16le"}]]
+        }"#).unwrap();
+        assert_eq!(wire.value(&bstr, 0), Ok(Value::Text("A\u{fffd}B".to_owned())));
         let paired = decode_json(br#"{
             "nativeType":"CFString","data":"preview","raw":"PdgA3g==",
             "metadata":[["raw_encoding",{"nativeType":"CFString","data":"utf-16-le"}]]
         }"#).unwrap();
         assert_eq!(wire.value(&paired, 0), Ok(Value::Text("😀".to_owned())));
+        assert_eq!(
+            decode_utf16(&[b'A']),
+            Err(WireError::Invalid("driver observation: invalid UTF-16 bytes"))
+        );
     }
 
     #[test]

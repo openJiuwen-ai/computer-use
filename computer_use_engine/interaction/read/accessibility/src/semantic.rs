@@ -197,6 +197,7 @@ fn format_error(error: TextError) -> ReadError {
         TextError::Invalid("nonfinite literal") => "Out of range float values are not JSON compliant",
         TextError::Unsupported("binary JSON value") => "Cannot serialize bytes",
         TextError::Invalid(detail) | TextError::Unsupported(detail) => detail,
+        TextError::Interrupted => "delivery interrupted",
     };
     ReadError(detail.to_owned())
 }

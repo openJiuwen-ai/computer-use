@@ -269,6 +269,7 @@ impl<'a> DetailSource<'a> {
         error: &str,
         detail: &str,
         refresh: bool,
+        budget: &mut crate::delivery_budget::DeliveryBudget<'_>,
     ) -> Result<RenderedSection> {
         let root = members.first().ok_or(TextError::Invalid("fallback root"))?;
         let prefix = format!(
@@ -278,6 +279,7 @@ impl<'a> DetailSource<'a> {
         let mut text = prefix.clone();
         let mut nodes = Vec::with_capacity(members.len());
         for reference in members {
+            budget.step()?;
             let token = self
                 .references
                 .get(reference.as_str())

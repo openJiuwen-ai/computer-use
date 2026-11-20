@@ -20,6 +20,6 @@ def require_read_engine():
         else:
             detail = "is missing"
         raise RuntimeError(f"The Rust accessibility read engine {detail}. Reinstall the native SDK.") from error
-    if getattr(_ax_read, "NATIVE_READ_CONTRACT", None) != 1:
+    if getattr(_ax_read, "NATIVE_READ_CONTRACT", None) != 2:
         raise RuntimeError("The Rust accessibility read engine is outdated. Rebuild the native SDK.")
     return _ax_read

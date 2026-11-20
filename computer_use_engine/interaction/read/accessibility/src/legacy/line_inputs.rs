@@ -355,6 +355,7 @@ mod tests {
                             record_fields: true,
                             ..LineOptions::default()
                         },
+                        &mut crate::delivery_budget::DeliveryBudget::default(),
                     )
                     .unwrap();
                     assert_eq!(

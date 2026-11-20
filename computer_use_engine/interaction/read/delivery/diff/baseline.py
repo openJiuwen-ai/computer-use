@@ -45,7 +45,7 @@ def native_current_tree(tree: DisplayTree, *, checkpoint=None):
     if current is None:
         if checkpoint is not None:
             checkpoint()
-        current = tree.prepared.handle.comparison(tree.scope, tree.indent, tree.details)
+        current = tree.prepared.handle.comparison(tree.scope, tree.indent, tree.details, checkpoint=checkpoint)
         if checkpoint is not None:
             checkpoint()
         _current_trees.set(tree, current)
