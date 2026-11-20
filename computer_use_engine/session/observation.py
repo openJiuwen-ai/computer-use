@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol
 
 from computer_use.identity import FrozenRecord
@@ -105,6 +106,53 @@ class LazyObservation(FrozenRecord):
             return self._presentation.screenshot
         return super().__getitem__(key)
 
+    @property
+    def source_screenshot(self):
+        """Return the captured PNG retained as input-coordinate authority."""
+        return self._data.get("screenshot")
+
+    @property
+    def visual(self):
+        """Return frame-scoped visual references, or None when this read had none."""
+        return self._data.get("visual")
+
+    def with_visual(self, visual, marked=None):
+        """Attach a visual reference table without changing captured source facts.
+
+        ``source_screenshot`` stays the exact capture used for input mapping. The
+        optional ``marked`` copy is display-only; when a presentation is already
+        bound, its projected document is kept and its pixels are replaced by the
+        marked copy so the host does not drop the numbered evidence.
+        """
+        from computer_use.interaction.read.presentation.document import DisplayDocument
+        from computer_use.visual.render import render_legend
+
+        legend = render_legend(visual)
+        # Keep the visual table ahead of the accessibility text: a long tree can
+        # otherwise hide the only addressable references from the reader.
+        if isinstance(self._document, DisplayDocument):
+            document = DisplayDocument.join((legend, self._document))
+        else:
+            document = CapturedTextDocument(f"{legend}\n{self._document.text}")
+        clone = object.__new__(type(self))
+        data = dict(self._data)
+        data["visual"] = visual
+        data["marked"] = marked
+        object.__setattr__(clone, "_data", MappingProxyType(data))
+        object.__setattr__(clone, "_display", self._display)
+        object.__setattr__(clone, "_document", document)
+        object.__setattr__(clone, "_detail_pages", self._detail_pages)
+        object.__setattr__(clone, "_details_follow_presentation", self._details_follow_presentation)
+        presentation = self._presentation
+        if presentation is not None:
+            # A bound presentation is what the host delivers. Keep its document
+            # projection but replace the pixels with the marked display copy so
+            # the numbered evidence is not silently dropped.
+            presentation = ObservationPresentation(document, marked if marked is not None else presentation.screenshot)
+        object.__setattr__(clone, "_presentation", presentation)
+        object.__setattr__(clone, "_rendered_text", None)
+        return clone
+
     def read_details(self, *, element: int | None = None, cursor: str | None = None, length: int = 4096) -> TextPage:
         """Page retained native facts and diagnostics from this observation.
 
@@ -174,6 +222,11 @@ def observation_screenshot(state: Mapping[str, Any]) -> Any:
     """Return the source capture, independently of a host's paired presentation."""
     # pylint: disable-next=protected-access
     return state._data["screenshot"] if isinstance(state, LazyObservation) else state.get("screenshot")
+
+
+def observation_marked(state: Mapping[str, Any]) -> Any:
+    """Return the display-only marked copy, if the observation captured one."""
+    return state.get("marked")
 
 
 def observation_presentation(state: Mapping[str, Any]) -> ObservationPresentation | None:

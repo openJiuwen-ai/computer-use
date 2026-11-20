@@ -44,6 +44,13 @@ class ImageCoordinates:
         x, y = point
         return x * self.source_size[0] / self.delivered_size[0], y * self.source_size[1] / self.delivered_size[1]
 
+    def delivered_point(self, point: Point) -> Point:
+        """Express a retained source-image point in the delivered image's pixels."""
+        if any(not math.isfinite(value) or not 0 <= value <= bound for value, bound in zip(point, self.source_size)):
+            raise local_failure("coordinates are outside the captured image")
+        x, y = point
+        return x * self.delivered_size[0] / self.source_size[0], y * self.delivered_size[1] / self.source_size[1]
+
     def source_parameters(self, operation: str, parameters: Mapping[str, Any]) -> dict[str, Any]:
         """Convert pointer positions once; retain every non-coordinate parameter."""
         result = dict(parameters)

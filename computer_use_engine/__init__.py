@@ -5,7 +5,9 @@
 
 from .client.computer import App, Computer, Element
 from .client.targets import Target
+from .client.visual import VisualElement
 from .errors import ComputerUseError
+from .visual.model import VisualElementInfo, VisualIndex, VisualRef
 from .types import (
     ActionResult,
     ActionImpact,
@@ -54,6 +56,10 @@ __all__ = [
     "Target",
     "TextPage",
     "View",
+    "VisualElement",
+    "VisualElementInfo",
+    "VisualIndex",
+    "VisualRef",
     "WindowCatalogue",
     "WindowChoice",
     "WindowInfo",

@@ -6,6 +6,8 @@
 from dataclasses import dataclass
 from typing import Literal, Mapping, Protocol, TypeAlias, TypedDict
 
+from .visual.model import VisualIndex, VisualRef
+
 Point: TypeAlias = tuple[float, float]
 View: TypeAlias = Literal["tree", "image", "both"]
 Direction: TypeAlias = Literal["up", "down", "left", "right"]
@@ -26,7 +28,7 @@ class ElementMatch(TypedDict, total=False):
 
 
 ElementPath: TypeAlias = list[str | ElementMatch]
-ElementSelector: TypeAlias = int | str | ElementPath
+ElementSelector: TypeAlias = int | str | ElementPath | VisualRef
 
 
 class Observation(Protocol):
@@ -46,6 +48,11 @@ class Observation(Protocol):
 
     @property
     def screenshot(self) -> bytearray | None:
+        pass
+
+    @property
+    def visual(self) -> VisualIndex | None:
+        """Frame-scoped visual references attached to this capture, if any."""
         pass
 
 
