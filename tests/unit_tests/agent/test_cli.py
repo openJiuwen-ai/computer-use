@@ -237,8 +237,13 @@ def test_cli_cancel_does_not_repeat_tool(model_server, tmp_path, monkeypatch):
             }
         )
     )
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    for key in ("API_BASE", "OPENAI_BASE_URL", "MODEL_NAME", "OPENAI_MODEL"):
+    # The child interpreter needs its own fixture for the CLI journal directory.
+    (tmp_path / "sitecustomize.py").write_text(
+        f"from pathlib import Path\nPath.home = classmethod(lambda cls: cls({str(tmp_path)!r}))\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path), prepend=os.pathsep)
+    for key in ("API_BASE", "OPENAI_BASE_URL", "MODEL_NAME", "OPENAI_MODEL", "MODEL_PROVIDER", "API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(key, raising=False)
     process = subprocess.Popen(
         [sys.executable, "-m", "computer_use_agent.cli", "--config", str(path), "Wait until cancelled"],

@@ -66,12 +66,12 @@ def _pipeline_stack_has_room():
     return False
 
 
-def diagnostic(event, *, _native_observation=None):
+def diagnostic(event, *, _native_observation=None, _timestamp=None):
     try:
         handler = _handler
         if handler:
             record = {
-                "timestamp": _pipeline_timestamp(),
+                "timestamp": _pipeline_timestamp() if _timestamp is None else _timestamp,
                 **event,
             }
             if _native_observation is not None:
@@ -116,7 +116,8 @@ def pipeline_diagnostic(event):
             cleanup=event.cleanup,
             dispatch=event.dispatch,
             errorType=event.error_type,
-        )
+        ),
+        _timestamp=event.timestamp,
     )
 
 

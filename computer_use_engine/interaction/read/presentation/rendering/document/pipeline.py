@@ -58,7 +58,9 @@ def _snapshot_sources(document):
 def _render_native_roots(source: tuple[PreparedSnapshot, bool], control: Control) -> RustRenderedTree:
     """Render and account for retained native roots inside the original call."""
     prepared, include_details = source
-    rendered = RustRenderedTree(prepared.handle.render(include_details), include_details)
+    rendered = RustRenderedTree(
+        prepared.handle.render(include_details, checkpoint=control.remaining), include_details
+    )
     if control.remaining is not None:
         control.remaining()
     return rendered

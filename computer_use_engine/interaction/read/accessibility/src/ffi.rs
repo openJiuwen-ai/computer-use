@@ -15,6 +15,7 @@ use pyo3::{
 use super::{
     capture::{CaptureError, ReadCapture},
     compact::{CompactBranch, CompactError, CompactSnapshot},
+    delivery_budget::{DeliveryBudget, DeliveryInterrupted},
     diff::DisplayOptions,
     disclosure::groups::WindowContext,
     facts::{query::{self, Query}, FactsError, FactsFailureKind},
@@ -161,6 +162,24 @@ fn checkpoint(callback: Option<&Py<PyAny>>) -> Result<(), BoundaryError> {
         Python::attach(|py| callback.call0(py)).map_err(BoundaryError)?;
     }
     Ok(())
+}
+
+fn run_delivery<T>(
+    callback: Option<&Py<PyAny>>, deliver: impl FnOnce(&mut DeliveryBudget<'_>) -> PyResult<T>,
+) -> PyResult<T> {
+    let Some(callback) = callback else { return deliver(&mut DeliveryBudget::default()) };
+    let mut error = None;
+    let mut poll = || {
+        checkpoint(Some(callback)).map_err(|BoundaryError(cause)| {
+            error = Some(cause);
+            DeliveryInterrupted
+        })
+    };
+    let result = deliver(&mut DeliveryBudget::new(Some(&mut poll)));
+    match error {
+        Some(error) => Err(error),
+        None => result,
+    }
 }
 
 #[derive(FromPyObject)]
@@ -765,20 +784,24 @@ impl NativePrepared {
         }
     }
 
-    fn comparison(&self, py: Python<'_>, scope: Vec<Option<String>>, indent: i64, details: bool) -> PyResult<delivery::NativeCurrent> {
-        py.detach(|| match &self.prepared {
-            PreparedRead::Compact(compact) => delivery::comparison(compact, scope, indent, details, self.quiet_windows_context),
+    #[pyo3(signature = (scope, indent, details, checkpoint=None))]
+    fn comparison(
+        &self, py: Python<'_>, scope: Vec<Option<String>>, indent: i64, details: bool, checkpoint: Option<Py<PyAny>>,
+    ) -> PyResult<delivery::NativeCurrent> {
+        py.detach(|| run_delivery(checkpoint.as_ref(), |budget| match &self.prepared {
+            PreparedRead::Compact(compact) => delivery::comparison(compact, scope, indent, details, self.quiet_windows_context, budget),
             PreparedRead::Legacy(legacy) => delivery::legacy_comparison(legacy, scope, indent, DisplayOptions {
                 compact: self.compact, public_api: self.public_api, details,
-            }),
-        })
+            }, budget),
+        }))
     }
 
-    fn render(&self, py: Python<'_>, details: bool) -> PyResult<delivery::NativeRendered> {
-        py.detach(|| match &self.prepared {
-            PreparedRead::Compact(compact) => delivery::render(compact, details),
-            PreparedRead::Legacy(legacy) => delivery::legacy_render(legacy, details),
-        })
+    #[pyo3(signature = (details, checkpoint=None))]
+    fn render(&self, py: Python<'_>, details: bool, checkpoint: Option<Py<PyAny>>) -> PyResult<delivery::NativeRendered> {
+        py.detach(|| run_delivery(checkpoint.as_ref(), |budget| match &self.prepared {
+            PreparedRead::Compact(compact) => delivery::render(compact, details, budget),
+            PreparedRead::Legacy(legacy) => delivery::legacy_render(legacy, details, budget),
+        }))
     }
 
     fn inline_child_refs(&self) -> PyResult<Vec<&str>> {
@@ -796,7 +819,7 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<NumberedReadCapture>()?;
     module.add_class::<NativePrepared>()?;
     delivery::register(module)?;
-    module.add("NATIVE_READ_CONTRACT", 1)?;
+    module.add("NATIVE_READ_CONTRACT", 2)?;
     module.add("NATIVE_READ_CALLBACK_CONTRACT", 1)?;
     module.add_function(wrap_pyfunction!(open_read_frame, module)?)?;
     module.add_function(wrap_pyfunction!(open_read_envelope, module)?)

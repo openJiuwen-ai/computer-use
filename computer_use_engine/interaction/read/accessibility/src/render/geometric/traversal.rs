@@ -72,9 +72,10 @@ impl<'a> Writer<'a> {
         self.schedule(id, depth, context, false);
     }
 
-    pub(super) fn run(&mut self) -> Result<()> {
+    pub(super) fn run(&mut self, budget: &mut super::DeliveryBudget<'_>) -> Result<()> {
         self.children(&self.plan.roots, 0, &Rc::from([]), false);
         while let Some(work) = self.work.pop() {
+            budget.step()?;
             match work {
                 Work::Block {
                     id,

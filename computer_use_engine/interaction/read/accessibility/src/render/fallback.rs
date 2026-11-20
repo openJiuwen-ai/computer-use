@@ -50,6 +50,7 @@ pub(crate) fn render(
     source: &DetailSource<'_>,
     members: &[String],
     failure: &PresentationFailure,
+    budget: &mut crate::delivery_budget::DeliveryBudget<'_>,
 ) -> Result<RenderedFallback, TextError> {
     let root = members.first().ok_or(TextError::Invalid("fallback root"))?;
     // branch_members checks this before the caller even attempts projection.
@@ -62,6 +63,7 @@ pub(crate) fn render(
         failure.error,
         &failure.detail,
         failure.stage == FailureStage::Terminal,
+        budget,
     )?;
     let issue = Value::Map(vec![
         ("root".to_owned(), Value::Text(root.clone())),
@@ -189,7 +191,7 @@ mod tests {
             detail: "broken\nrecord".to_owned(),
             stage: FailureStage::Preparation,
         };
-        let fallback = render(&source(&facts), &members, &failure).unwrap();
+        let fallback = render(&source(&facts), &members, &failure, &mut Default::default()).unwrap();
         let prefix = "Presentation fallback for 7: uncompressed collected facts (ValueError: \"broken\\nrecord\"). Relations: element references.";
         let root = concat!(
             "7 native element\n\t\"name\": \"open\\u2028more\"\n",
@@ -223,7 +225,7 @@ mod tests {
             stage: FailureStage::Terminal,
             ..failure
         };
-        let refreshed = render(&source(&facts), &members, &terminal).unwrap();
+        let refreshed = render(&source(&facts), &members, &terminal, &mut Default::default()).unwrap();
         assert!(refreshed.section.refresh);
         assert_eq!(refreshed.record(), fallback.record());
     }
@@ -294,7 +296,7 @@ mod tests {
             stage: FailureStage::Terminal,
         };
         assert!(matches!(
-            render(&source(&facts), &["7".into(), "7".into()], &error),
+            render(&source(&facts), &["7".into(), "7".into()], &error, &mut Default::default()),
             Err(TextError::Invalid("Invalid source-tree identity before presentation"))
         ));
     }

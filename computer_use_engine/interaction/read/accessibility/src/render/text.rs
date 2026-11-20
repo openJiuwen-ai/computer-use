@@ -4,6 +4,8 @@
 
 use std::fmt::Write;
 
+use crate::delivery_budget::DeliveryInterrupted;
+
 use super::super::value::Value;
 
 #[derive(Clone, Copy)]
@@ -17,6 +19,13 @@ pub(crate) enum JsonFormat {
 pub(crate) enum TextError {
     Unsupported(&'static str),
     Invalid(&'static str),
+    Interrupted,
+}
+
+impl From<DeliveryInterrupted> for TextError {
+    fn from(_: DeliveryInterrupted) -> Self {
+        Self::Interrupted
+    }
 }
 
 type Result<T> = std::result::Result<T, TextError>;

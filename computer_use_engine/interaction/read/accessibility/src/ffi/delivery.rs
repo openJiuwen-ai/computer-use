@@ -13,6 +13,7 @@ use pyo3::{
 use super::{compact_error, value_from_py, value_to_py};
 use crate::{
     compact::CompactSnapshot,
+    delivery_budget::DeliveryBudget,
     diff::{
         self, Bindings, ComparisonNode, ComparisonTree, ContextNode, Coverage, CurrentTree, DeltaPlan, DisplayOptions,
         DisplayRoot, Mode,
@@ -41,9 +42,10 @@ pub(super) struct NativeRendered {
 
 pub(super) fn comparison(
     compact: &CompactSnapshot, scope: Vec<Option<String>>, indent: i64, details: bool, quiet_windows_context: bool,
+    budget: &mut DeliveryBudget<'_>,
 ) -> PyResult<NativeCurrent> {
     let options = DisplayOptions { compact: true, public_api: true, details };
-    comparison_result(compact.comparison(scope, options, indent).map(|mut current| {
+    comparison_result(compact.comparison(scope, options, indent, budget).map(|mut current| {
         // Signatures and coverage stay complete. Only an unchanged partial node
         // stops forcing all its ancestors back into each Windows window delta.
         if quiet_windows_context && !details {
@@ -59,12 +61,13 @@ fn comparison_result(result: Result<CurrentTree, diff::InvalidPreparedComparison
 
 pub(super) fn legacy_comparison(
     snapshot: &LegacySnapshot, scope: Vec<Option<String>>, indent: i64, options: DisplayOptions,
+    budget: &mut DeliveryBudget<'_>,
 ) -> PyResult<NativeCurrent> {
-    comparison_result(snapshot.comparison(scope, options, indent))
+    comparison_result(snapshot.comparison(scope, options, indent, budget))
 }
 
-pub(super) fn legacy_render(snapshot: &LegacySnapshot, details: bool) -> PyResult<NativeRendered> {
-    let body = snapshot.render(details).map_err(legacy_error)?;
+pub(super) fn legacy_render(snapshot: &LegacySnapshot, details: bool, budget: &mut DeliveryBudget<'_>) -> PyResult<NativeRendered> {
+    let body = snapshot.render(details, budget).map_err(legacy_error)?;
     Ok(NativeRendered { body, title: None })
 }
 
@@ -76,8 +79,8 @@ fn legacy_error(error: render::TextError) -> PyErr {
     PyValueError::new_err(format!("Native read presentation: {error:?}"))
 }
 
-pub(super) fn render(compact: &CompactSnapshot, details: bool) -> PyResult<NativeRendered> {
-    let mut presentation = compact.render().map_err(compact_error)?;
+pub(super) fn render(compact: &CompactSnapshot, details: bool, budget: &mut DeliveryBudget<'_>) -> PyResult<NativeRendered> {
+    let mut presentation = compact.render(budget).map_err(compact_error)?;
     if details {
         compact.render_details(&mut presentation).map_err(compact_error)?;
     }

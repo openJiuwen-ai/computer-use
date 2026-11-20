@@ -10,6 +10,7 @@ use std::{
 use super::super::collections::{CollectionDocument, CollectionMemberPrefix};
 use super::super::content::readable::{ReadableHeading, ReadablePlan};
 use super::super::content::{FieldContentPlan, FieldPresentation, MemberMode};
+use super::super::delivery_budget::DeliveryBudget;
 use super::super::disclosure::{
     coverage::CoveragePlan, groups::GroupDisclosurePlan, DisclosurePlan,
 };
@@ -1318,11 +1319,13 @@ pub(crate) fn render_geometric(
     projection: &Projection,
     atoms: &AtomPlan,
     options: &WriterOptions<'_>,
+    budget: &mut DeliveryBudget<'_>,
 ) -> Result<GeometricRendered> {
     let mut depths = HashMap::new();
     if options.groups.is_some() {
         let mut pending: Vec<_> = projection.roots.iter().map(|id| (*id, 0)).collect();
         while let Some((id, depth)) = pending.pop() {
+            budget.step()?;
             let node = projection
                 .node(id)
                 .ok_or(TextError::Invalid("geometric group depth target"))?;
@@ -1348,7 +1351,7 @@ pub(crate) fn render_geometric(
         depths,
         work: Vec::new(),
     };
-    writer.run()?;
+    writer.run(budget)?;
     let expected: HashSet<_> = plan.target_refs.iter().copied().collect();
     if writer.seen != expected {
         return Err(TextError::Invalid("serialized interface target inventory"));
@@ -1374,6 +1377,7 @@ pub(crate) fn render_geometric(
     }
     let mut groups: Vec<(Option<i64>, Vec<&str>)> = Vec::new();
     for id in &writer.menus {
+        budget.step()?;
         let atom = writer.atom(*id)?;
         if let Some((_, group)) = groups
             .iter_mut()
@@ -1401,6 +1405,7 @@ pub(crate) fn render_geometric(
     };
     let mut notes = Vec::new();
     for id in &writer.order {
+        budget.step()?;
         let atom = writer.atom(*id)?;
         let values = writer.values(*id, &atom.slots, false)?;
         let mut style = writer.style(*id);
@@ -1511,7 +1516,7 @@ mod tests {
             std::thread::Builder::new()
                 .stack_size(512 * 1024)
                 .spawn_scoped(scope, || {
-                    render_geometric(&plan, &projection, &atoms, &options)
+                    render_geometric(&plan, &projection, &atoms, &options, &mut DeliveryBudget::default())
                         .unwrap()
                         .section
                 })
@@ -1549,7 +1554,7 @@ mod tests {
             std::thread::Builder::new()
                 .stack_size(512 * 1024)
                 .spawn_scoped(scope, || {
-                    render_geometric(&plan, &projection, &atoms, &options)
+                    render_geometric(&plan, &projection, &atoms, &options, &mut DeliveryBudget::default())
                         .unwrap()
                         .section
                 })

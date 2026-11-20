@@ -4,6 +4,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::delivery_budget::{DeliveryBudget, DeliveryInterrupted};
+
 use super::{
     signature::{sequence, Digest}, ComparisonNode, ComparisonTree, ContextNode, CurrentTree,
     DisplayOptions, DisplayRoot, InvalidContext, RootContexts, Scope, Signatures, Value,
@@ -22,6 +24,13 @@ type Result<T> = std::result::Result<T, InvalidPreparedComparison>;
 pub(crate) enum InvalidPreparedComparison {
     Evidence(&'static str),
     Context(InvalidContext),
+    Interrupted,
+}
+
+impl From<DeliveryInterrupted> for InvalidPreparedComparison {
+    fn from(_: DeliveryInterrupted) -> Self {
+        Self::Interrupted
+    }
 }
 
 /// All plans are owned Rust records and retain the corresponding interface
@@ -281,6 +290,7 @@ pub(crate) fn prepare_comparison_tree(
     facts: &Value,
     roots: &[PreparedRoot<'_>],
     inactive_selections: Option<&HashMap<String, (Value, Value)>>,
+    budget: &mut DeliveryBudget<'_>,
 ) -> Result<CurrentTree> {
     let mut evidence = ComparisonEvidence::default();
     for root in roots {
@@ -300,7 +310,7 @@ pub(crate) fn prepare_comparison_tree(
     let roots: Vec<_> = roots.iter().map(|root| ComparisonRoot {
         reference: root.reference, members: root.members, projection: root.projection,
     }).collect();
-    compare_rows(scope, options, indent, semantic, facts, &roots, evidence, inactive_selections)
+    compare_rows(scope, options, indent, semantic, facts, &roots, evidence, inactive_selections, budget)
 }
 
 fn compare_rows(
@@ -312,6 +322,7 @@ fn compare_rows(
     roots: &[ComparisonRoot<'_>],
     evidence: ComparisonEvidence,
     inactive_selections: Option<&HashMap<String, (Value, Value)>>,
+    budget: &mut DeliveryBudget<'_>,
 ) -> Result<CurrentTree> {
     let mut fallback = None;
     let mut result = Vec::new();
@@ -320,6 +331,7 @@ fn compare_rows(
             let mut pending: Vec<_> = projection.roots.iter().rev().map(|id| (*id, None, indent)).collect();
             let mut visited = HashSet::new();
             while let Some((id, parent, depth)) = pending.pop() {
+                budget.step()?;
                 if !visited.insert(id) {
                     return Err(InvalidPreparedComparison::Evidence("duplicate projected node"));
                 }
@@ -369,6 +381,7 @@ fn compare_rows(
             }
             let (native, refs) = fallback.as_ref().expect("fallback facts initialized");
             for reference in root.members {
+                budget.step()?;
                 let token = refs.get(reference.as_str()).and_then(|value| value.as_str())
                     .ok_or(InvalidPreparedComparison::Evidence("fallback source reference"))?;
                 let mut fields = native.get(token).and_then(|row| row.as_map())
@@ -385,6 +398,7 @@ fn compare_rows(
     let mut nodes = Vec::with_capacity(result.len());
     let mut context = Vec::with_capacity(result.len());
     for row in &result {
+        budget.step()?;
         let (signature, content) = signatures.capture_with_layout(&row.fields, row.layout);
         context.push(ContextNode::from_fields(&row.fields).map_err(InvalidPreparedComparison::Context)?);
         nodes.push(ComparisonNode { reference: row.reference.clone(), parent: row.parent.clone(), depth: row.depth, signature, content });
@@ -432,7 +446,7 @@ mod tests {
         let prepared = prepare_comparison_tree(Vec::new(), DisplayOptions::default(), 2, &semantic, &facts, &[PreparedRoot {
             reference: "1", members: &members, projection: None, interface: None, readable: None,
             groups: None, fields: None, atoms: None, outside_window_fields: &outside,
-        }], None).unwrap();
+        }], None, &mut DeliveryBudget::default()).unwrap();
         let expected = json(r#"{"node":"native-a","values":{"name":"A"},"_relations":[
         {"source":"native-a","property":"AXRows"},{"source":"native-a","property":"AXParent"}]}"#);
         assert_eq!(prepared.comparison.nodes[0].signature, Signatures::default().capture(expected.as_map().unwrap()).0);
