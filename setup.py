@@ -178,7 +178,12 @@ def install_source_backend(build_lib: Path, output: Path, platform_tag: str | No
                     check=True,
                 )
                 return publish_source_backend(staging, output, platform_tag)
-        except (subprocess.CalledProcessError, OSError, KeyError, TypeError, ValueError):
+        except (subprocess.CalledProcessError, OSError, KeyError, TypeError, ValueError) as error:
+            if platform_tag.startswith("macosx_") and (
+                "CUA_MACOS_RELEASE_TEAM_ID" in os.environ
+                or getattr(error, "returncode", None) == getattr(os, "EX_CONFIG", 78)
+            ):
+                raise
             (output / "backend.json").unlink(missing_ok=True)
             _LOG.debug("Could not assemble the source-built Computer Use driver.", exc_info=True)
             reason = "native_build_failed"

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from backend_artifacts import TARGETS, artifact_name, fingerprint, host_target, inspect_archive, sha256, write_archive
 from console import write_result
+from macos_signing import release_requirement, verify_release_wheel
 from sdk_native import DEFAULT_PYTHON_TAG, check_archive
 from sdk_native import artifact_name as engine_artifact_name
 
@@ -203,11 +204,16 @@ def build_wheels(
             environment.pop("COMPUTER_USE_BACKEND_DIR", None)
             environment.pop("COMPUTER_USE_SDK_NATIVE_ARCHIVE", None)
             environment["COMPUTER_USE_SDK_NATIVE_ARCHIVE"] = str(engine.resolve())
-            subprocess.run(
-                [sys.executable, "-m", "build", "--wheel", "--outdir", str(directory), str(source)],
-                env=environment,
-                check=True,
-            )
+            with tempfile.TemporaryDirectory(dir=directory) as pending:
+                subprocess.run(
+                    [sys.executable, "-m", "build", "--wheel", "--outdir", pending, str(source)],
+                    env=environment,
+                    check=True,
+                )
+                (wheel,) = Path(pending).glob("*.whl")
+                if target.startswith("macos-") and "CUA_MACOS_RELEASE_TEAM_ID" in environment:
+                    verify_release_wheel(wheel, environment["CUA_MACOS_RELEASE_TEAM_ID"])
+                wheel.replace(directory / wheel.name)
 
 
 def main(argv=None):
@@ -226,8 +232,13 @@ def main(argv=None):
         "--repository", default=os.environ.get("GITCODE_REPOSITORY") or os.environ.get("ATOMGIT_REPOSITORY")
     )
     wheels.add_argument("--output", type=Path, default=Path("dist"))
+    for stage in (native, wheels):
+        stage.add_argument("--macos-release-team", help="Require the official Developer ID signature for this Apple Team ID.")
     args = parser.parse_args(argv)
     try:
+        if getattr(args, "macos_release_team", None) is not None:
+            release_requirement(args.macos_release_team)
+            os.environ["CUA_MACOS_RELEASE_TEAM_ID"] = args.macos_release_team
         if args.command == "name":
             write_result(sys.stdout, artifact_name(ROOT, args.target))
         elif args.command == "backend":

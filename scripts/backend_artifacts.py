@@ -5,6 +5,7 @@
 import ast
 import hashlib
 import json
+import os
 import platform
 import stat
 import sys
@@ -54,6 +55,8 @@ def fingerprint(root, target):
     system = {"darwin": "macos", "win32": "windows", "linux": "linux"}[TARGETS[target][0]]
     files = [root / name for name in ("scripts/native.py", "scripts/backend_artifacts.py", "scripts/distribution.py")]
     directories = [root / f"os_adapter/{system}"]
+    if system == "macos":
+        files.append(root / "scripts/macos_signing.py")
     if system != "linux":
         files.extend((
             root / "scripts/pointer.py",
@@ -61,15 +64,17 @@ def fingerprint(root, target):
             root / "computer_use_engine/interaction/read/presentation/formatting.py",
         ))
         directories.append(root / "os_adapter/assets/agent-pointer")
+    def source_name(name):
+        return not (name.startswith(".") or name in ("__pycache__", "build", "dist") or name.endswith(".egg-info"))
+
     for directory in directories:
-        for path in directory.rglob("*"):
-            if not path.is_file() or path.name in GENERATED:
-                continue
-            if not any(
-                part.startswith(".") or part in ("__pycache__", "build", "dist") or part.endswith(".egg-info")
-                for part in path.relative_to(directory).parts
-            ):
-                files.append(path)
+        for parent, children, names in os.walk(directory):
+            # SwiftPM and codesign may replace directories under .build while we fingerprint source inputs.
+            children[:] = [name for name in children if source_name(name)]
+            for name in names:
+                path = Path(parent) / name
+                if source_name(name) and name not in GENERATED and path.is_file():
+                    files.append(path)
     inputs = {
         path.relative_to(root).as_posix(): sha256(path.read_bytes().replace(b"\r\n", b"\n"))
         for path in sorted(set(files))

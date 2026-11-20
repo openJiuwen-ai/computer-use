@@ -96,7 +96,14 @@ uv run --no-project --python .venv computer-use-permissions
 uv run --no-project --python .venv computer-use-permissions --request
 ```
 
-源码构建使用临时签名。若重建后权限检查仍提示未授权，请在系统设置中为当前构建的 **Jiuwen CUA** 重新授权。
+经常修改 macOS 驱动时，在 Xcode 的「设置 → Apple 账户 → 管理证书」创建 **Apple Development** 身份。
+运行 `security find-identity -v -p codesigning`，将所选身份的 40 位指纹单独一行保存到
+`~/.computer-use/macos-signing-identity`（先创建父目录）。以后从任意工作树运行
+`computer-use-build` 都会使用它。首次从临时签名切换时，给新构建授予辅助功能和屏幕录制权限。
+同一签名身份下的更新通常可沿用这两项授权。
+
+可以用环境变量 `CUA_MACOS_SIGN_IDENTITY` 覆盖本机设置。未配置时沿用临时签名，也可显式设为 `-`。
+证书私钥保留在钥匙串。更换或续期证书后，更新保存的指纹。
 
 打开一个有窗口的应用，例如计算器。第一条命令列出正在运行的应用，第二条把 `APP_NAME` 换成列表中的应用名。输出应包含这个窗口的实际控件或文字。
 
