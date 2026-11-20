@@ -62,6 +62,8 @@ def fingerprint(root, target):
         "macos": ("Sources", "Package.swift", "Resources/AppIcon.icns"),
         "windows": ("Sources", "Build", "Workers"),
     }
+    if system == "macos":
+        inputs.append(root / "scripts/macos_signing.py")
     source_names = sources.get(system)
     if source_names is None:
         raise ValueError(f"Unknown backend target: {target}")
@@ -219,6 +221,14 @@ def _assemble_platform(source, archive, staging, target, *, python_tag="cp311"):
                 raise ValueError(f"Built wheel contains the wrong backend file: {name}")
             if target == "macos-arm64" and info.external_attr >> 16 & 0o777 != (payload / name).stat().st_mode & 0o777:
                 raise ValueError(f"Built wheel lost macOS backend permissions: {name}")
+    if target.startswith("macos-") and "CUA_MACOS_RELEASE_TEAM_ID" in environment:
+        subprocess.run(
+            [
+                sys.executable, source / "scripts/macos_signing.py",
+                "--team-id", environment["CUA_MACOS_RELEASE_TEAM_ID"], wheel,
+            ],
+            check=True,
+        )
     return wheel
 
 

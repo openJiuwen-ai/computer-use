@@ -30,3 +30,35 @@ uv run --no-dev --group build python scripts/distribution.py wheels \
 ```
 
 `--python-tag` 默认是 `cp311`。将匹配源码指纹的 `sdk-native-*.zip` 和 `backend-*.zip` 放在同一个制品目录，即可在组包主机上生成对应平台和 ABI 的 wheel。
+
+## macOS 官方发布签名
+
+在项目的 Mac 发布机上，将组织的 **Developer ID Application** 证书及私钥配置在构建账号的钥匙串。
+将官方 Apple Team ID 配置为 CI 变量 `APPLE_TEAM_ID`，将该证书的指纹配置为
+`CUA_MACOS_SIGN_IDENTITY`。私钥由发布机保管。下例生成并验证 ARM64 / CPython 3.11 的 wheel。
+
+```sh
+: "${APPLE_TEAM_ID:?Set the official Apple Developer Team ID}"
+: "${CUA_MACOS_SIGN_IDENTITY:?Set the Developer ID Application signing identity}"
+export CUA_MACOS_SIGN_IDENTITY
+uv run --no-dev --group build python scripts/distribution.py backend \
+  --target macos-arm64 --macos-release-team "$APPLE_TEAM_ID"
+uv run --python 3.11 --no-project python scripts/sdk_native.py build --output .artifacts/backends
+uv run --no-dev --group build python scripts/distribution.py wheels \
+  --target macos-arm64 --python-tag cp311 --backend-dir .artifacts/backends \
+  --macos-release-team "$APPLE_TEAM_ID" --output dist/macos-release
+```
+
+原生构建先签好 `Jiuwen CUA.app`，启用 hardened runtime 和安全时间戳，再生成后端文件哈希。
+组包在 Mac 上取出最终 wheel 内的 App，校验签名完整性、标识 `com.openjiuwen.cua`、
+Developer ID Application 证书类型和预期 Team ID。验证通过才将新 wheel 移入输出目录。
+云构建入口可用环境变量 `CUA_MACOS_RELEASE_TEAM_ID` 指定相同的发布校验。
+
+如果 wheel 在其他系统组装，将生成的候选 wheel 交给 Mac 发布步骤，针对待上传的同一批文件运行：
+
+```sh
+python3 scripts/macos_signing.py --team-id "${APPLE_TEAM_ID:?}" dist/macos-release/*macosx*.whl
+```
+
+发布任务只在该命令成功后上传已验文件。首次发布和更换签名团队时，另在一台测试 Mac 上安装 wheel，
+授予辅助功能和录屏权限，并以一次窗口元素读取和一次截图验证实际使用效果。

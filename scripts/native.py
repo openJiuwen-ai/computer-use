@@ -47,9 +47,42 @@ def build_mac_os(root=None, *, configuration="release"):
     return executable
 
 
+class MacOSSigningError(RuntimeError):
+    """The configured identity could not sign the macOS driver."""
+
+
 def _bundle_macos_driver(root, binary):
+    import ctypes
+    import errno
+
+    from .macos_signing import sign_bundle
+
     native = root / "os_adapter/macos"
     bundle = native / ".build/Jiuwen CUA.app"
+    bundle.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=bundle.parent, prefix=".sign-") as temporary:
+        staged = Path(temporary) / bundle.name
+        _write_macos_bundle(staged, native, binary)
+        try:
+            sign_bundle(staged)
+        except (ValueError, OSError, subprocess.CalledProcessError) as error:
+            raise MacOSSigningError(f"Could not sign Jiuwen CUA.app: {error}") from error
+        # Launch Services also observes the bundle's timestamp on in-place upgrades.
+        staged.touch()
+        try:
+            staged.rename(bundle)
+        except OSError as error:
+            if error.errno not in (errno.EEXIST, errno.ENOTEMPTY):
+                raise
+            # macOS renamex_np(RENAME_SWAP) keeps a complete, signed app visible to running clients.
+            libc = ctypes.CDLL(None, use_errno=True)
+            if libc.renamex_np(os.fsencode(staged), os.fsencode(bundle), 0x00000002):
+                code = ctypes.get_errno()
+                raise OSError(code, os.strerror(code), bundle) from error
+    return bundle / "Contents/MacOS/computer-use-driver"
+
+
+def _write_macos_bundle(bundle, native, binary):
     executable = bundle / "Contents/MacOS/computer-use-driver"
     executable.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(binary, executable)
@@ -76,10 +109,6 @@ def _bundle_macos_driver(root, binary):
 """,
         encoding="utf-8",
     )
-    run("codesign", ["--force", "--sign", "-", "--identifier", "com.openjiuwen.cua", bundle], native)
-    # Launch Services uses the bundle's timestamp, including on in-place builds.
-    bundle.touch()
-    return executable
 
 
 def _protocol_version(version):
@@ -589,4 +618,8 @@ def linux_launcher_cli():
 
 if __name__ == "__main__":
     source_dir, resource_dir, wheel_platform = sys.argv[1:]
-    bundle_wheel_backend(Path(source_dir), Path(resource_dir), wheel_platform)
+    try:
+        bundle_wheel_backend(Path(source_dir), Path(resource_dir), wheel_platform)
+    except MacOSSigningError as error:
+        _LOG.error("%s", error)
+        sys.exit(os.EX_CONFIG)

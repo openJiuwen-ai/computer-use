@@ -96,7 +96,14 @@ uv run --no-project --python .venv computer-use-permissions
 uv run --no-project --python .venv computer-use-permissions --request
 ```
 
-Source builds use ad hoc signing. If the permission check reports missing access after a rebuild, grant access to the current **Jiuwen CUA** build in System Settings.
+For repeated macOS development, create an **Apple Development** identity in Xcode Settings under Apple Accounts →
+Manage Certificates. Run `security find-identity -v -p codesigning` and save the selected identity's 40-character
+fingerprint on its own line in `~/.computer-use/macos-signing-identity` (create the parent directory first).
+`computer-use-build` uses this identity across worktrees. Grant Accessibility and Screen Recording on the first
+switch from ad hoc signing. Subsequent builds with the same signing identity can normally retain those grants.
+
+`CUA_MACOS_SIGN_IDENTITY` overrides the local setting. Unconfigured builds use ad hoc signing, as does an explicit
+`-`. The private key stays in Keychain. Update the saved fingerprint when the certificate changes or is renewed.
 
 Open an app with a visible window, such as Calculator. The first command lists running apps. Replace `APP_NAME` in the second with a name from the list. The output should contain controls or text from the actual window.
 
