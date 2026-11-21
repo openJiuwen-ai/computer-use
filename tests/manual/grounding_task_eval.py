@@ -12,9 +12,9 @@ Each task has an objective verifier that reads application state after the agent
 finishes, so the treatment (workspace VisualRef changes) and the baseline (HEAD)
 are compared on outcome rather than on what the model claims.
 
-Prerequisites: an interactive unlocked Windows desktop, the built driver, and
-``COMPUTER_USE_WINDOWS_OCR=1``. The model is taken from ANTHROPIC_BASE_URL /
-ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL.
+Prerequisites: an interactive unlocked Windows desktop and the built driver.
+The model is taken from ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN /
+ANTHROPIC_MODEL.
 
 Usage:
   python tests/manual/grounding_task_eval.py --task wemeet_schedule --variant treatment
@@ -210,10 +210,7 @@ async def run_case(case: Case, variant: str, run_id: str, max_iterations: int) -
             events.append(_summarize_event(kind, data))
 
     workspace = Path(tempfile.mkdtemp(prefix=f"cua-eval-{variant}-{case.name}-"))
-    mcp_env = {
-        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
-        "COMPUTER_USE_WINDOWS_OCR": "1",
-    }
+    mcp_env = {"PYTHONPATH": os.environ.get("PYTHONPATH", "")}
     agent = ComputerUseAgent(
         _model(),
         config=AgentConfig(

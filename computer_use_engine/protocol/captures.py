@@ -18,7 +18,7 @@ _window_state = obj(
 )
 _visual_text = obj(
     dict(
-        source=enum("windowsOCR"),
+        source=enum("windowsOCR", "macOSVision"),
         status=enum("complete", "partial", "unavailable"),
         language=string(nonblank=True, max=64).nullable(),
         truncated=enum(True, False),

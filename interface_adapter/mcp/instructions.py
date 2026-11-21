@@ -326,12 +326,15 @@ starts fresh; applications, files and completed effects persist.
 ## Visual references
 
 Use `visual="auto"` on a both/image read when the accessibility tree is empty, only exposes
-structural containers, or lacks a named control for a visible button, icon, tab or text.
-It adds a visual reference table and marks the screenshot; `visual="always"` forces the table
-even when the tree supplies a document body. If an app-scope read reports several windows and
-selects none, pass the chosen `window=ref` to the read; a visual table belongs to one delivered
-window. Visual references currently require Windows OCR capture metadata; other platforms keep
-the accessibility path and produce no visual table. Example:
+structural containers, or lacks a named control for visible text. It adds a visual reference
+table and marks the screenshot. These references are recognized OCR text regions, not icon
+detection; an icon without text must use an exposed accessibility element or explicit image
+coordinates. Auto is the normal route; `visual="always"` is a diagnostic override for a
+table that auto suppresses. If an app-scope
+read reports several windows and selects none, pass the chosen `window=ref` to the read; a
+visual table belongs to one delivered window. Visual references require Windows OCR or
+macOS Vision and are collected only for a read that requests them; on other platforms `auto`
+adds no table and `always` reports an empty table without requesting an extra image. Example:
 
 ```text
 Visual elements (marked on the image; coordinates in image pixels):

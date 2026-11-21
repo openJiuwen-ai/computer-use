@@ -144,6 +144,7 @@ import CoreGraphics
                                 "nativeApplicationLifetime", "nativeWindowCatalogue",
                                 "nativeMenuActions",
                                 "nativeMenuShortcuts", "nativeCapture", "nativeCaptureKinds", "nativeCaptureRetention",
+                                "nativeVisualText",
                                 "nativeGlobalInput", "nativePointLocation",
                                 "nativeObservationPreparation", "nativeApplicationReopen",
                                 "nativeAppChangeEvents",

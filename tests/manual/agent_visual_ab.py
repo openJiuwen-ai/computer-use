@@ -8,7 +8,6 @@ Requires an Anthropic-compatible model endpoint and a built Windows driver:
   set API_BASE=http://127.0.0.1:8080/
   set API_KEY=...
   set MODEL_NAME=...
-  set COMPUTER_USE_WINDOWS_OCR=1
   python tests/manual/agent_visual_ab.py
 
 The fixture is restarted for each case. The treatment must use VisualRef; the
@@ -47,10 +46,7 @@ def _config(workspace: Path) -> AgentConfig:
         mcp=McpConfig(
             command=sys.executable,
             args=("-m", "computer_use_mcp"),
-            env={
-                "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
-                "COMPUTER_USE_WINDOWS_OCR": "1",
-            },
+            env={"PYTHONPATH": os.environ.get("PYTHONPATH", "")},
         ),
     )
 

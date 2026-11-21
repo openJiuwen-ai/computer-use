@@ -27,6 +27,7 @@ from computer_use.interaction.requests import ComputerInput
 from computer_use.native.contracts import Intent
 from computer_use.protocol.primitives import nonempty
 from computer_use.protocol.validation import normalize_key, validate_paste_text, validate_text
+from computer_use.session.capture_options import visual_text_scope
 from computer_use.session.operations import operation
 
 from ..visual.index import build_visual_index, visual_frame_id
@@ -334,11 +335,12 @@ class App:
 
         Visual references come from captured OCR lines that no accessibility row
         already names. The default ``visual="never"`` keeps the existing
-        observation contract unchanged. ``visual="auto"`` opts into frame
-        indexing and attaches references when an image is delivered and the
-        accessibility text has no usable document body; ``visual="always"``
-        forces them. Attached references are numbered on a display-only image
-        copy; the retained source screenshot stays unmarked for input mapping.
+        observation contract unchanged. ``visual="auto"`` is the normal route:
+        it attaches references when an image is delivered and the accessibility
+        text has no usable document body. ``visual="always"`` is a diagnostic
+        override that forces them. Attached references are numbered on a
+        display-only image copy; the retained source screenshot stays unmarked
+        for input mapping.
         """
         _window(window)
         parameters.view(view, full, menu_path)
@@ -348,17 +350,33 @@ class App:
             raise local_failure("visual must be auto, always, or never")
         if self._window_title is not None and menu_path is not None:
             raise local_failure("menu_path can expand beyond the exact titled window")
-        if view == "tree" and visual != "never":
+        supported = self._visual_text_supported()
+        # Only a driver that can attach OCR evidence needs the image component.
+        if view == "tree" and visual != "never" and supported:
             view = "both"
         # A failed or successful new read invalidates references from the prior frame.
         self._visual = None
         self._visual_frame = None
         self._visual_window = None
-        result = await operation(
-            lambda: self._controller.run(ObserveUI(self, view, full, menu_path, allow_foreground, window))
-        )
+        with visual_text_scope(visual != "never" and supported):
+            result = await operation(
+                lambda: self._controller.run(ObserveUI(self, view, full, menu_path, allow_foreground, window))
+            )
         if visual == "never":
             return result
+        if not supported:
+            # No capture was added for a feature this driver cannot supply.
+            if visual == "auto" or not hasattr(result, "with_visual"):
+                return result
+            index = VisualIndex(
+                frame_id="",
+                elements=(),
+                detail="Visual references require a driver that supplies OCR capture metadata (currently Windows).",
+            )
+            self._visual = index
+            self._visual_frame = ""
+            self._visual_window = window
+            return result.with_visual(index, None)
         # MCP may bind a resized presentation image; only the retained source
         # PNG carries capture metadata for OCR evidence and coordinate mapping.
         screenshot = getattr(result, "source_screenshot", None) or result.screenshot
@@ -369,9 +387,11 @@ class App:
             if visual == "auto":
                 return result
             if sys.platform == "win32":
-                ocr_hint = "Check COMPUTER_USE_WINDOWS_OCR=1 and the installed Windows OCR language pack."
+                ocr_hint = "Check the installed Windows OCR language pack."
+            elif sys.platform == "darwin":
+                ocr_hint = "Check that macOS Vision supports the visible text."
             else:
-                ocr_hint = "Visual references currently require Windows OCR capture metadata."
+                ocr_hint = "Visual references require Windows OCR or macOS Vision capture metadata."
             index = VisualIndex(
                 frame_id=visual_frame_id(screenshot),
                 elements=(),
@@ -393,6 +413,22 @@ class App:
                 coordinates = None
         marked = render_marks(screenshot, index, coordinates=coordinates) if index.elements else None
         return result.with_visual(index, marked)
+
+    def _visual_text_supported(self):
+        """Whether captures on this connection can attach OCR evidence.
+
+        Capabilities are negotiated on the first system call. Before that,
+        Windows OCR and macOS Vision are the current providers, so an ordinary
+        read does not add a round-trip merely to decide its view. The capture
+        layer still requires the negotiated capability before it requests OCR.
+        """
+        transport = getattr(self._controller, "transport", None)
+        if transport is None:
+            return True
+        capabilities = getattr(transport, "capabilities", frozenset())
+        if capabilities:
+            return "nativeVisualText" in capabilities
+        return sys.platform in ("win32", "darwin")
 
     @staticmethod
     def _auto_visual(result, index):

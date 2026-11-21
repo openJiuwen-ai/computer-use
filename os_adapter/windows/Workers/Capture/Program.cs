@@ -279,7 +279,7 @@ namespace ComputerUse.Windows
                         throw new InvalidOperationException("capture exceeds image budget");
                     var png = stream.ToArray();
                     var output = Wire.Obj("png", Convert.ToBase64String(png), "width", shape.Width, "height", shape.Height, "rect", Wire.Obj("x", source.X, "y", source.Y, "width", source.Width, "height", source.Height));
-                    if (Environment.GetEnvironmentVariable("COMPUTER_USE_WINDOWS_OCR") == "1")
+                    if (p.ContainsKey("visualText") && Convert.ToBoolean(p["visualText"]))
                         output["visualText"] = CaptureOcr.Read(png, shape.Width, shape.Height);
                     return output;
                 }

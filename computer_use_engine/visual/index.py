@@ -108,7 +108,7 @@ _CJK_GAP = re.compile(r"(?<=[㐀-䶿一-鿿豈-﫿])\s+(?=[㐀-䶿一-鿿豈-﫿
 
 
 def _normalize_label(text: str) -> str:
-    """Collapse OCR whitespace and the CJK gaps Windows OCR often inserts."""
+    """Collapse OCR whitespace and the CJK gaps providers often insert."""
     return _CJK_GAP.sub("", " ".join(text.split()))
 
 

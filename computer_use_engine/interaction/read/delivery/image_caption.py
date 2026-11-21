@@ -50,13 +50,16 @@ def render_image_caption(width: int, height: int, facts: Mapping[str, Any]) -> s
 
 
 def _visual_text(visual: Mapping[str, Any] | None) -> str:
-    "Format Windows OCR text and image-pixel rectangles as visual observation hints."
+    "Format provider OCR text and image-pixel rectangles as visual observation hints."
     if visual is None:
         return ""
+    source = {"windowsOCR": "Windows OCR", "macOSVision": "macOS Vision"}.get(
+        str(visual.get("source", "")), str(visual.get("source", "OCR"))
+    )
     if visual["status"] == "unavailable":
-        return "\nVisual text (Windows OCR): unavailable. " + visual.get("reason", "")
+        return f"\nVisual text ({source}): unavailable. " + visual.get("reason", "")
     lines = [
-        "\nVisual text (Windows OCR, " + str(visual["language"]) + "): recognized text and image-pixel rectangles "
+        f"\nVisual text ({source}, " + str(visual["language"]) + "): recognized text and image-pixel rectangles "
         "(x, y, width, height)."
     ]
     lines.extend(

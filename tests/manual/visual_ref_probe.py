@@ -3,14 +3,12 @@
 """Live probe for visual OCR references.
 
 Prerequisites:
-  - Windows 10 1903+ / Windows 11 with an interactive, unlocked desktop.
-  - The Windows driver built and installed.
-  - ``COMPUTER_USE_WINDOWS_OCR=1`` in the probe process environment.
-  - A Windows OCR language pack for the target text.
+  - Windows 10 1903+ / Windows 11 or macOS 14+ with an interactive, unlocked desktop.
+  - The platform driver built and installed.
+  - Windows: an OCR language pack for the target text. macOS: no extra component.
 
 Usage:
   python tests/manual/visual_fixture.py
-  set COMPUTER_USE_WINDOWS_OCR=1
   python tests/manual/visual_ref_probe.py --title "CUA Visual Fixture" --click Export
 """
 
@@ -36,8 +34,8 @@ def main(argv=None) -> int:
         visual = getattr(observation, "visual", None)
         if visual is None or not visual.elements:
             print(
-                "\nNo visual elements were captured. Check COMPUTER_USE_WINDOWS_OCR=1, "
-                "the Windows OCR language pack, and that the window is visible.",
+                "\nNo visual elements were captured. Check the platform OCR support "
+                "(Windows language pack or macOS Vision) and that the window is visible.",
                 file=sys.stderr,
             )
             return 2

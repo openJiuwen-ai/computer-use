@@ -33,9 +33,9 @@ def _png(width=300, height=200):
     return PNG(output.getvalue())
 
 
-def _visual(lines, *, status="complete", truncated=False):
+def _visual(lines, *, source="windowsOCR", status="complete", truncated=False):
     return {
-        "source": "windowsOCR",
+        "source": source,
         "status": status,
         "language": "en-US",
         "truncated": truncated,
@@ -45,6 +45,37 @@ def _visual(lines, *, status="complete", truncated=False):
 
 def _line(text, x, y, width, height):
     return {"text": text, "rect": {"x": x, "y": y, "width": width, "height": height}}
+
+
+def test_macos_vision_capture_metadata_reaches_the_visual_index():
+    import base64
+
+    from computer_use.protocol.captures import capture_metadata, decode_capture
+
+    png = _png(300, 200)
+    image = decode_capture(
+        {
+            "id": "capture-mac",
+            "kind": "window",
+            "scope": "surface-mac",
+            "startedAt": 1,
+            "completedAt": 2,
+            "width": 300,
+            "height": 200,
+            "png": base64.b64encode(bytes(png)).decode("ascii"),
+            "visualText": _visual([_line("Export", 20, 20, 60, 20)], source="macOSVision"),
+        },
+        "window",
+        "surface-mac",
+    )
+
+    metadata = capture_metadata(image)
+    index = build_visual_index(image, frame_id="capture-mac", metadata=metadata)
+
+    assert metadata["visualText"]["source"] == "macOSVision"
+    assert index is not None
+    assert index.source == "macOSVision"
+    assert index.elements[0].source == "macOSVision"
 
 
 def test_build_visual_index_deduplicates_accessibility_names():
