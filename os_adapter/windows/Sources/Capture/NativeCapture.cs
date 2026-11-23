@@ -82,7 +82,7 @@ namespace ComputerUse.Windows
             return Wire.Obj("name", NativeReadStore.Text(item.DisplayName), "selector", item.Application);
         }
 
-        public object Capture(Dictionary<string, object> target, string kind, int maxDimension, Request r)
+        public object Capture(Dictionary<string, object> target, string kind, int maxDimension, bool visualText, Request r)
         {
             Check(r);
             Native.SettleRecentInput(r);
@@ -99,7 +99,7 @@ namespace ComputerUse.Windows
                                       "show the same window, or read it with allow_foreground=True if minimized");
                 var layout = captures == null ? null : new NativePointerLayout();
                 Rectangle physical = Native.Bounds(window.Handle);
-                var windowPixels = NativeWindowPixels.Read(window, maxDimension, r, worker);
+                var windowPixels = NativeWindowPixels.Read(window, maxDimension, visualText, r, worker);
                 var geometry = windowPixels.Geometry;
                 string png = windowPixels.Png;
                 store.Validate(target, r);

@@ -11,11 +11,13 @@ namespace ComputerUse.Windows
         internal readonly Dictionary<string, object> Target;
         internal readonly string Kind;
         internal readonly int Dimension;
-        internal NativeCaptureRequest(Dictionary<string, object> target, string kind, int dimension)
+        internal readonly bool VisualText;
+        internal NativeCaptureRequest(Dictionary<string, object> target, string kind, int dimension, bool visualText)
         {
             Target = target;
             Kind = kind;
             Dimension = dimension;
+            VisualText = visualText;
         }
     }
 }

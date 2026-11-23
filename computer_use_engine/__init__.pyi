@@ -31,6 +31,9 @@ __all__ = [
     "Target",
     "TextPage",
     "View",
+    "VisualElement",
+    "VisualIndex",
+    "VisualRef",
     "WindowInfo",
     "__version__",
 ]
@@ -51,8 +54,31 @@ class ElementMatch(TypedDict, total=False):
     name: str
     identifier: str
 
+@dataclass(frozen=True)
+class VisualRef:
+    """A frame-scoped reference returned in an observation's visual table."""
+    ref: int
+
+class VisualElementInfo:
+    ref: int
+    label: str
+    rect: tuple[float, float, float, float]
+    source: str
+    confidence: float
+    frame_id: str
+    @property
+    def center(self) -> tuple[float, float]: ...
+
+class VisualIndex:
+    frame_id: str
+    elements: tuple[VisualElementInfo, ...]
+    truncated: bool
+    source: str
+    detail: str
+    def element(self, ref: int) -> VisualElementInfo | None: ...
+
 ElementPath = list[str | ElementMatch]
-ElementSelector = int | str | ElementPath
+ElementSelector = int | str | ElementPath | VisualRef
 
 class Computer:
     def __init__(self, *, allow_global_input: bool = True) -> None: ...
@@ -109,10 +135,11 @@ class App:
     # 应用范围；window= 可选地限定本次调用，同一应用共用元素编号。
     def element(
         self, target: ElementSelector, *, timeout_ms: int = 3000, window: int | None = None, fresh: bool = False
-    ) -> Element: ...
+    ) -> Element | VisualElement: ...
     def read(
         self, *, view: View = "tree", full: bool = False, menu_path: list[str] | None = None,
-        allow_foreground: bool = False, window: int | None = None
+        allow_foreground: bool = False, window: int | None = None,
+        visual: Literal["auto", "always", "never"] = "never",
     ) -> Observation: ...
 
     # 位置来自指定窗口最近交付的截图，或 App 最近交付的截图，可包含相关弹窗。
@@ -149,6 +176,23 @@ class Element:
     def open_menu(self) -> ActionResult: ...
     def perform_action(self, action: str) -> ActionResult: ...
 
+class VisualElement:
+    """A pointer-addressable region from `App.read(visual=...)`."""
+    @property
+    def ref(self) -> int: ...
+    @property
+    def label(self) -> str: ...
+    @property
+    def rect(self) -> tuple[float, float, float, float]: ...
+    @property
+    def confidence(self) -> float: ...
+    @property
+    def target(self) -> Target: ...
+    def click(self, options: ClickOption | None = None) -> ActionResult: ...
+    def scroll(self, direction: Direction, *, pages: float = 1) -> ActionResult: ...
+    def read_text(self, *, length: int = 4096) -> TextPage: ...
+    # 视觉引用只有指针语义；键盘输入需要先点击并升级到 AX 接收者。
+
 # 以下是只读返回数据，不是模型需要创建的操作对象。
 class Observation:
     # 原始 native/AX 详情的几何保留其声明的 screen/AX 坐标系，不等同截图像素。
@@ -158,6 +202,7 @@ class Observation:
     text: str
     screenshot: bytearray | None
     preparation: Mapping[str, object] | None
+    visual: VisualIndex | None
 
 class AppInfo:
     id: int

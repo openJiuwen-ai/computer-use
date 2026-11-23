@@ -29,7 +29,7 @@ namespace ComputerUse.Windows
 
     internal interface INativeCaptureBackend
     {
-        object Capture(Dictionary<string, object> target, string kind, int maxDimension, Request request);
+        object Capture(Dictionary<string, object> target, string kind, int maxDimension, bool visualText, Request request);
     }
 
     internal interface INativeReadEventBackend : IDisposable

@@ -77,7 +77,8 @@ import ApplicationServices
     }
 
     func capture(
-        binding: [String: Any], maxDimension: Int, retainedCaptures: Set<String>? = nil
+        binding: [String: Any], maxDimension: Int, retainedCaptures: Set<String>? = nil,
+        visualText: Bool = false
     ) async throws -> [String: Any] {
         let instance = try string(binding["instance"], label: "instance")
         let root = try string(binding["rootWindow"], label: "rootWindow")
@@ -133,10 +134,16 @@ import ApplicationServices
         let retired = Self.retirements(order, retaining: retainedReferences)
         order.removeAll { retired.contains($0) }
         for id in retired { entries.removeValue(forKey: id) }
+        var image = captured.image.protocolValue(kind: .window, scope: scope)
+        if visualText {
+            image["visualText"] = await CaptureOCR.read(
+                base64: captured.image.png, width: captured.image.width, height: captured.image.height)
+            try RequestDiagnostics.checkCancellation()
+        }
         let frame = captured.window.frame
         var result: [String: Any] = [
             "kind": "capture", "binding": binding, "observed": interval.observation(),
-            "image": captured.image.protocolValue(kind: .window, scope: scope),
+            "image": image,
             "coordinates": [
                 "space": "window-pixels", "origin": "top-left", "nativeSpace": "screen-points",
                 "toNative": [

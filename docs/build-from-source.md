@@ -23,6 +23,8 @@ Get-Command link.exe
 Test-Path "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 ```
 
+**Windows OCR / macOS Vision（可选）。** 视觉引用使用 Windows 自带 OCR 或 macOS 的 Vision 框架，只在调用方请求 `app.read(visual="auto")` 时采集，普通读取不会运行 OCR。Windows 请在“设置 → 时间和语言 → 语言和区域 → 语言功能”中为识别语言安装 OCR；macOS 无需额外组件。
+
 **Linux。** 以下命令适用于 Debian 13。其他发行版请安装对应的软件包，并运行下方的 AT-SPI 检查。
 
 ```sh

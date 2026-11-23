@@ -52,6 +52,7 @@ from computer_use.session.observation import (
     bind_observation_presentation,
     lazy_observation,
     observation_document,
+    observation_marked,
     observation_presentation,
     observation_screenshot,
     peek_observation_text,
@@ -499,7 +500,13 @@ class Runtime:
             return cached
         document = observation.get("document") or observation_document(original)
         view = observation_presentation(original)
-        png = view.screenshot if view is not None else observation_screenshot(original)
+        marked = observation_marked(original)
+        if view is not None:
+            png = view.screenshot
+        elif marked is not None:
+            png = marked
+        else:
+            png = observation_screenshot(original)
         delivery = self.prepared_image(png) if png is not None else None
         if view is not None:
             presented = dict(observation, state=original, document=view.document, sourceState=original)

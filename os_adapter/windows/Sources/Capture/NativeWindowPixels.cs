@@ -20,7 +20,8 @@ namespace ComputerUse.Windows
             return new NativeChildProcess("", executable);
         }
 
-        internal static NativeWindowPixels Read(Window window, int maxDimension, Request request, NativeCaptureWorker helper)
+        internal static NativeWindowPixels Read(Window window, int maxDimension, bool visualText, Request request,
+                                                NativeCaptureWorker helper)
         {
             var failures = new List<string>();
             foreach (string route in new[]
@@ -35,7 +36,7 @@ namespace ComputerUse.Windows
                 window.Validate();
                 try
                 {
-                    var result = helper.Exchange(Wire.Obj("route", route, "handle", window.Handle.ToInt64(), "pid", window.Pid, "started", window.Started.ToString(), "maxDimension", maxDimension), request, route == "wgc" ? 2500 : 1500);
+                    var result = helper.Exchange(Wire.Obj("route", route, "handle", window.Handle.ToInt64(), "pid", window.Pid, "started", window.Started.ToString(), "maxDimension", maxDimension, "visualText", visualText), request, route == "wgc" ? 2500 : 1500);
                     window.Validate();
                     request.Check();
                     var rect = Wire.Object(result["rect"]);

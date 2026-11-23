@@ -23,6 +23,8 @@ Get-Command link.exe
 Test-Path "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 ```
 
+**Windows OCR / macOS Vision (optional).** Visual references use the built-in Windows OCR engine or the macOS Vision framework and are collected only when the caller requests `app.read(visual="auto")`; ordinary reads do not run OCR. On Windows, install the OCR language feature for each recognition language under Settings > Time & Language > Language & region > Language features. macOS needs no extra component.
+
 **Linux.** The commands below use Debian 13. On other distributions, install the equivalent packages and run the AT-SPI check below.
 
 ```sh

@@ -14,7 +14,7 @@ namespace ComputerUse.Windows
         internal const string Effects = "QUERY/RESOURCE";
         internal static object Run(NativeCaptureRequest value, Request r, INativeCaptureBackend capture)
         {
-            var result = capture.Capture(value.Target, value.Kind, value.Dimension, r);
+            var result = capture.Capture(value.Target, value.Kind, value.Dimension, value.VisualText, r);
             r.Check();
             return result;
         }

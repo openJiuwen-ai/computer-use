@@ -14,11 +14,12 @@ namespace ComputerUse.Windows
         internal const string Effects = "PURE";
         internal static NativeCaptureRequest Run(Dictionary<string, object> p, Func<object, Dictionary<string, object>> binding, NativeOperationView state)
         {
-            Wire.Keys(p, "operation,target,kind,maxDimension");
+            Wire.Keys(p, "operation,target,kind,maxDimension", "visualText");
             string id = Wire.Str(p, "operation");
             var target = binding(p["target"]);
             string kind = Wire.Str(p, "kind");
             int dimension = (int)Wire.Num(p, "maxDimension", 1, 4096, true);
+            bool visualText = p.ContainsKey("visualText") && Wire.Bool(p, "visualText");
             if (state.Operation == null || id != state.Operation)
                 throw new Failure("stale_target", "native operation is unknown or expired");
             if (state.Write != null || !NativeWriteOperation.Same(target, state.Original) || target["node"] != null || target["capture"] != null || !new[]
@@ -27,7 +28,7 @@ namespace ComputerUse.Windows
                 "desktop"
             }.Contains(kind) || (target["surface"] != null) != (kind == "window"))
                 throw new Failure("invalid_request", "capture requires the original window or desktop read scope");
-            return new NativeCaptureRequest(target, kind, dimension);
+            return new NativeCaptureRequest(target, kind, dimension, visualText);
         }
     }
 }

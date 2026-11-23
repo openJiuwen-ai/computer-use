@@ -41,7 +41,7 @@ namespace ComputerUse.Windows
                 return ReadCapabilities.Concat(writer == null ? new string[0] : writer.Capabilities)
                     .Concat(reader is INativeReadEventBackend ? new[] { "nativeReadEvents" } : new string[0])
                     .Concat(reader is INativeReadPreparation ? new[] { "nativeObservationPreparation" } : new string[0])
-                    .Concat(capture == null ? new string[0] : new[] { "nativeCapture", "nativeCaptureKinds" })
+                    .Concat(capture == null ? new string[0] : new[] { "nativeCapture", "nativeCaptureKinds", "nativeVisualText" })
                     .Concat(launch == null ? new string[0] : new[] { "nativeLaunch", "nativeWindowsApplicationLookup" })
                     .ToArray();
             }

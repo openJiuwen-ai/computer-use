@@ -11,11 +11,18 @@ struct NativeCaptureRequest {
     let kind: Kind
     let maxDimension: Int
     let retainedCaptures: Set<String>?
+    let visualText: Bool
 
     init(_ raw: Any?) throws {
         var keys: Set<String> = ["operation", "target", "kind", "maxDimension"]
         if (raw as? [String: Any])?["retainedCaptures"] != nil { keys.insert("retainedCaptures") }
+        if (raw as? [String: Any])?["visualText"] != nil { keys.insert("visualText") }
         let p = try object(raw, keys: keys)
+        if let value = p["visualText"] {
+            visualText = try boolean(value, label: "visualText")
+        } else {
+            visualText = false
+        }
         if let values = p["retainedCaptures"] {
             guard let values = values as? [Any] else {
                 throw DriverError("retainedCaptures must be an array of image references", code: .invalidRequest)

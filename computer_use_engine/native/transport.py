@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 
 from computer_use.diagnostics import local_failure, pipeline_diagnostic
 from computer_use.errors import ComputerUseError
+from computer_use.interaction.read.accessibility._native import require_read_engine
+from computer_use.interaction.read.accessibility.frame import NativeReadCapture, NativeReadFrame
 from computer_use.native.contracts import (
     ApplicationBinding,
     Binding,
@@ -30,22 +32,21 @@ from computer_use.native.contracts import (
     Facts,
     GlobalTarget,
     HostPolicy,
-    InputEffect,
     InputContext,
+    InputEffect,
     Knowledge,
-    OpenedOperation,
     NativeImpact,
+    OpenedOperation,
     PreparationImpact,
     Primitive,
     StepResult,
 )
 from computer_use.native.lifecycle import CallLifecycle
-from computer_use.interaction.read.accessibility._native import require_read_engine
-from computer_use.interaction.read.accessibility.frame import NativeReadCapture, NativeReadFrame
 from computer_use.native.queries import NativeNodeQuery
 from computer_use.protocol.captures import capture_metadata
 from computer_use.protocol.primitives import utf16_length
 from computer_use.protocol.records import relation_end, relation_slots
+from computer_use.session.capture_options import visual_text_requested
 
 if TYPE_CHECKING:
     from computer_use.protocol.records import Record
@@ -906,6 +907,10 @@ class ConnectionPort:
             "kind": kind,
             "maxDimension": max_dimension,
         }
+        if visual_text_requested() and "nativeVisualText" in self.capabilities:
+            # OCR evidence is collected only for a read that asked for it. A
+            # driver without this capability keeps its existing capture cost.
+            parameters["visualText"] = True
         if "nativeCaptureRetention" in self.capabilities:
             parameters["retainedCaptures"] = sorted(self.capture_references)
         value = await self.connection.request(

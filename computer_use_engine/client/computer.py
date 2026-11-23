@@ -9,6 +9,7 @@ import sys
 import weakref
 
 from computer_use.diagnostics import local_failure
+from computer_use.errors import ComputerUseError
 from computer_use.interaction.agent.requests import (
     ActOnElement,
     CloseWindow,
@@ -26,13 +27,18 @@ from computer_use.interaction.requests import ComputerInput
 from computer_use.native.contracts import Intent
 from computer_use.protocol.primitives import nonempty
 from computer_use.protocol.validation import normalize_key, validate_paste_text, validate_text
+from computer_use.session.capture_options import visual_text_scope
 from computer_use.session.operations import operation
 
+from ..visual.index import build_visual_index, visual_frame_id
+from ..visual.model import VisualIndex, VisualRef
+from ..visual.render import render_marks
 from . import parameters
 from .execution import on_session, session_executor, synchronous
 from .handles import handle_created
 from .host import global_input_allowed
 from .targets import Target, as_target, image_target, target_request
+from .visual import VisualElement
 
 
 def observation_state(state=None, *, document=None):
@@ -235,6 +241,9 @@ class App:
             else InstanceState(scope["selector"])
         )
         self._anchor, self._image = None, None
+        self._visual = None
+        self._visual_frame = None
+        self._visual_window = None
         handle_created(self, dict(kind="App", controller=controller, selector=scope["selector"]))
 
     @synchronous
@@ -248,7 +257,10 @@ class App:
         """Locate a name/path in the latest observation, or explicitly query fresh facts.
 
         Numbers always retain their original binding; fresh only controls
-        name/path lookup. Reads and subsequent input still use their own rules.
+        name/path lookup. A bare name that AX cannot find may resolve to an
+        exact OCR label from the current visual observation on the same window;
+        that handle is pointer-only. Reads and subsequent input still use their
+        own rules.
         """
         _window(window)
         # pylint: disable-next=unidiomatic-typecheck
@@ -259,24 +271,181 @@ class App:
             parameters.reference(target, "element reference")
         if fresh is not True and fresh is not False:
             raise local_failure("fresh must be a boolean")
+        if isinstance(target, VisualRef):
+            async def resolve_visual():
+                index = self._visual
+                if index is None:
+                    raise local_failure("visual reference requires a visual observation", "stale_target")
+                if self._visual_window != window:
+                    raise local_failure(
+                        "visual reference belongs to a different window; read that window again",
+                        "stale_target",
+                    )
+                element = index.element(target.ref)
+                if element is None:
+                    raise local_failure("visual reference is not in the current observation", "stale_target")
+                return VisualElement(self._controller, self, element, window=window, _internal=True)
+
+            return resolve_visual()
 
         async def resolve():
             request = ResolveElement(self, target, timeout_ms, window, fresh)
-            snapshot = await operation(lambda: self._controller.run(request))
+            try:
+                snapshot = await operation(lambda: self._controller.run(request))
+            except ComputerUseError as error:
+                visual = self._visual_lookup(target, window, fresh, error)
+                if visual is not None:
+                    return visual
+                raise
             return Element(self._controller, self, snapshot, _internal=True)
 
         return resolve()
 
+    def _visual_lookup(self, target, window, fresh, error):
+        """Resolve a bare visible label through the current visual observation.
+
+        Accessibility remains authoritative: this runs only after the AX lookup
+        reports no match, for a bare string, on the frame and window that
+        produced the visual table. Ambiguous labels require an explicit
+        ``VisualRef`` instead of guessing.
+        """
+        if error.code != "element_not_found":
+            return None
+        if fresh or not isinstance(target, str):
+            return None
+        index = self._visual
+        if index is None or self._visual_window != window:
+            return None
+        label = " ".join(target.split())
+        matches = [item for item in index.elements if item.label == label]
+        if not matches:
+            return None
+        if len(matches) > 1:
+            hints = ", ".join(f"v{item.ref} {item.label!r}" for item in matches[:8])
+            raise local_failure(
+                f"the name matches several visual references: {hints}; use app.element(VisualRef(n))",
+                "ambiguous_target",
+            )
+        return VisualElement(self._controller, self, matches[0], window=window, _internal=True)
+
     @synchronous
-    def read(self, *, view="tree", full=False, menu_path=None, allow_foreground=False, window=None):
-        """Observe the app or window, with optional foreground preparation."""
+    async def read(self, *, view="tree", full=False, menu_path=None, allow_foreground=False, window=None,
+                   visual="never"):
+        """Observe the app or window, with optional visual references.
+
+        Visual references come from captured OCR lines that no accessibility row
+        already names. The default ``visual="never"`` keeps the existing
+        observation contract unchanged. ``visual="auto"`` is the normal route:
+        it attaches references when an image is delivered and the accessibility
+        text has no usable document body. ``visual="always"`` is a diagnostic
+        override that forces them. Attached references are numbered on a
+        display-only image copy; the retained source screenshot stays unmarked
+        for input mapping.
+        """
         _window(window)
         parameters.view(view, full, menu_path)
         if allow_foreground is not True and allow_foreground is not False:
             raise local_failure("allow_foreground must be a boolean")
+        if visual not in ("auto", "always", "never"):
+            raise local_failure("visual must be auto, always, or never")
         if self._window_title is not None and menu_path is not None:
             raise local_failure("menu_path can expand beyond the exact titled window")
-        return operation(lambda: self._controller.run(ObserveUI(self, view, full, menu_path, allow_foreground, window)))
+        supported = self._visual_text_supported()
+        # Only a driver that can attach OCR evidence needs the image component.
+        if view == "tree" and visual != "never" and supported:
+            view = "both"
+        # A failed or successful new read invalidates references from the prior frame.
+        self._visual = None
+        self._visual_frame = None
+        self._visual_window = None
+        with visual_text_scope(visual != "never" and supported):
+            result = await operation(
+                lambda: self._controller.run(ObserveUI(self, view, full, menu_path, allow_foreground, window))
+            )
+        if visual == "never":
+            return result
+        if not supported:
+            # No capture was added for a feature this driver cannot supply.
+            if visual == "auto" or not hasattr(result, "with_visual"):
+                return result
+            index = VisualIndex(
+                frame_id="",
+                elements=(),
+                detail="Visual references require a driver that supplies OCR capture metadata (currently Windows).",
+            )
+            self._visual = index
+            self._visual_frame = ""
+            self._visual_window = window
+            return result.with_visual(index, None)
+        # MCP may bind a resized presentation image; only the retained source
+        # PNG carries capture metadata for OCR evidence and coordinate mapping.
+        screenshot = getattr(result, "source_screenshot", None) or result.screenshot
+        if screenshot is None:
+            return result
+        index = build_visual_index(screenshot, frame_id=visual_frame_id(screenshot), tree_text=result.text)
+        if index is None:
+            if visual == "auto":
+                return result
+            if sys.platform == "win32":
+                ocr_hint = "Check the installed Windows OCR language pack."
+            elif sys.platform == "darwin":
+                ocr_hint = "Check that macOS Vision supports the visible text."
+            else:
+                ocr_hint = "Visual references require Windows OCR or macOS Vision capture metadata."
+            index = VisualIndex(
+                frame_id=visual_frame_id(screenshot),
+                elements=(),
+                detail=f"OCR returned no usable text. {ocr_hint}",
+            )
+        elif visual == "auto" and not self._auto_visual(result, index):
+            return result
+        if not hasattr(result, "with_visual"):
+            return result
+        self._visual = index
+        self._visual_frame = index.frame_id
+        self._visual_window = window
+        coordinates = None
+        state = getattr(self._controller, "state", None)
+        if state is not None:
+            try:
+                coordinates = state(self).delivered_coordinates
+            except Exception:  # noqa: BLE001 - a display mapping is optional presentation evidence
+                coordinates = None
+        marked = render_marks(screenshot, index, coordinates=coordinates) if index.elements else None
+        return result.with_visual(index, marked)
+
+    def _visual_text_supported(self):
+        """Whether captures on this connection can attach OCR evidence.
+
+        Capabilities are negotiated on the first system call. Before that,
+        Windows OCR and macOS Vision are the current providers, so an ordinary
+        read does not add a round-trip merely to decide its view. The capture
+        layer still requires the negotiated capability before it requests OCR.
+        """
+        transport = getattr(self._controller, "transport", None)
+        if transport is None:
+            return True
+        capabilities = getattr(transport, "capabilities", frozenset())
+        if capabilities:
+            return "nativeVisualText" in capabilities
+        return sys.platform in ("win32", "darwin")
+
+    @staticmethod
+    def _auto_visual(result, index):
+        """Expose visual candidates when AX did not supply a usable document body."""
+        if not index.elements:
+            return False
+        text = getattr(result, "text", "") or ""
+        if any(
+            marker in text
+            for marker in ("Tree: unavailable", "AX: unavailable", "Tree: not requested")
+        ):
+            return True
+        # A complete-looking tree can still omit the document/editor body, as
+        # WPS Writer does. Document text is the strongest available AX signal.
+        # A Chromium legacy bridge is different: it reports a document body but
+        # not its controls, so the remaining OCR rows stay useful.
+        return "Document text:" not in text or "Chrome Legacy Window" in text
 
     @synchronous
     def click(self, options=None, *, at, window=None, force_pointer=False):

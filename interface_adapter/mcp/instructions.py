@@ -40,7 +40,12 @@ class ElementMatch(TypedDict, total=False):
     identifier: str
 
 ElementPath = list[str | ElementMatch]  # Ancestor-to-descendant names or matching fields.
-ElementSelector = int | str | ElementPath
+
+@dataclass(frozen=True, kw_only=True)
+class VisualRef:
+    ref: int  # vN from the observation's visual table
+
+ElementSelector = int | str | ElementPath | VisualRef
 
 class Target:
     # A retained locator from Element.target or Computer/App.point(); the calling method chooses the input route.
@@ -96,18 +101,21 @@ class App:
 
     # Element refs belong to this App and stay bound across reads.
     # Name/path lookup reuses returned observations, with live fallback.
-    # fresh=True queries current names/paths; it does not rebind saved Elements or numeric refs.
+    # If a bare name has no AX match, a current visual observation on the same
+    # window may resolve the exact OCR label; the returned VisualElement is pointer-only.
+    # fresh=True queries current names/paths; it does not use visual fallback.
     # timeout_ms: 0..10000.
     def element(
         self, target: ElementSelector, *, timeout_ms: int = 3000, window: int | None = None, fresh: bool = False
-    ) -> Element: ...
+    ) -> Element | VisualElement: ...
     # Read the app/window or an application menu path of exact titles.
     # allow_foreground=True permits window preparation. On macOS it can reopen a running app with no window.
     # If a read returns only the application menu, use app.read(view="both", allow_foreground=True) to show its window.
     # Title-bound Apps reject menu_path.
     def read(
         self, *, view: View = "tree", full: bool = False, menu_path: list[str] | None = None,
-        allow_foreground: bool = False, window: int | None = None
+        allow_foreground: bool = False, window: int | None = None,
+        visual: Literal["auto", "always", "never"] = "never",
     ) -> Observation: ...
 
     # Coordinates use the delivered App image. macOS menu clicks may invoke the item's Press action;
@@ -314,6 +322,42 @@ and check completed effects before continuing. Do not infer a permission problem
 ordinary input failures or read timeouts.
 Timeout/cancellation clears Python state. If the task may continue, the next call
 starts fresh; applications, files and completed effects persist.
+
+## Visual references
+
+Use `visual="auto"` on a both/image read when the accessibility tree is empty, only exposes
+structural containers, or lacks a named control for visible text. It adds a visual reference
+table and marks the screenshot. These references are recognized OCR text regions, not icon
+detection; an icon without text must use an exposed accessibility element or explicit image
+coordinates. Auto is the normal route; `visual="always"` is a diagnostic override for a
+table that auto suppresses. If an app-scope
+read reports several windows and selects none, pass the chosen `window=ref` to the read; a
+visual table belongs to one delivered window. Visual references require Windows OCR or
+macOS Vision and are collected only for a read that requests them; on other platforms `auto`
+adds no table and `always` reports an empty table without requesting an extra image. Example:
+
+```text
+Visual elements (marked on the image; coordinates in image pixels):
+    v1 "Export" source=windowsOCR
+```
+
+Use `app.element(VisualRef(n))` for pointer actions. Import it explicitly:
+
+```python
+from computer_use import VisualRef
+
+obs = app.read(view="both", visual="auto")
+print([(item.ref, item.label) for item in obs.visual.elements])
+app.element(VisualRef(1)).click()
+```
+
+Visual references are frame-scoped: they have no accessibility identity or keyboard receiver,
+so `type_text`/`paste`/`press_key` remain unavailable until a real AX element supplies the
+receiver. Resolve a `VisualRef` before the next read and keep the returned `Element`; a later
+read invalidates the old vN even though the resolved handle remains safe. The image must be
+delivered before its mapping can be used for input. A new read, scroll, resize, or
+display-scale change invalidates the old vN. Text already named by an AX row is not assigned a
+vN; prefer that AX reference.
 
 ## Using the API
 
