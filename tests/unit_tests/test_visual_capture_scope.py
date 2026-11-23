@@ -37,6 +37,29 @@ def _port(capabilities):
     return connection, port
 
 
+def test_capture_request_schema_accepts_visual_text():
+    from computer_use.protocol.execution import decode_capture_request
+
+    request = decode_capture_request(
+        {
+            "operation": "operation",
+            "target": {
+                "session": "session",
+                "instance": "instance",
+                "rootWindow": "window",
+                "surface": "surface",
+                "node": None,
+                "capture": None,
+            },
+            "kind": "window",
+            "maxDimension": 2048,
+            "visualText": True,
+        }
+    )
+
+    assert request["visualText"] is True
+
+
 def test_capture_requests_ocr_only_for_a_visual_read(monkeypatch):
     target = Binding("session", None, None, "surface")
     monkeypatch.setattr(transport_module, "decode_binding", lambda value: target)

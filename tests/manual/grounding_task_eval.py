@@ -52,6 +52,9 @@ WPS_EXE = Path(os.environ.get(
 ))
 WEMEET_EXE = Path(os.environ.get("WEMEET_EXE", r"C:\Program Files\Tencent\WeMeet\wemeetapp.exe"))
 CODE_EXE = Path(os.environ.get("CODE_EXE", r"D:\Microsoft VS Code\Code.exe"))
+TRAE_EXE = Path(os.environ.get(
+    "TRAE_EXE", r"C:\Users\admin\AppData\Local\Programs\Trae CN\Trae CN.exe"
+))
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -1020,6 +1023,107 @@ def _cleanup_vscode(context: dict) -> None:
     )
 
 
+def _trae_start_prompt() -> str:
+    return """
+打开标题为 "TraeCode CN" 的 Trae CN 窗口。当前是首次运行欢迎页，界面可见“欢迎使用”和“开始”：
+
+1. 点击“开始”。
+2. 如果随后出现登录、引导或工作区选择页，选择跳过、关闭或继续，不要输入任何账号或密码。
+3. 读取并报告点击后的窗口标题和可见界面文字。
+
+不要使用 shell 或直接修改文件。
+""".strip()
+
+
+def _setup_trae(run_id: str) -> dict:
+    base = OUTPUTS / run_id / "trae"
+    user = base / "user"
+    extensions = base / "extensions"
+    workspace = base / "trae_ws"
+    for path in (user, extensions, workspace):
+        shutil.rmtree(path, ignore_errors=True)
+        path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            (
+                "Get-CimInstance Win32_Process | Where-Object { "
+                f"$_.CommandLine -like '*{base}*' }} | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+            ),
+        ],
+        timeout=20,
+        check=False,
+    )
+    time.sleep(0.5)
+    process = subprocess.Popen(
+        [
+            str(TRAE_EXE),
+            "--user-data-dir", str(user),
+            "--extensions-dir", str(extensions),
+            "--new-window",
+            "--disable-workspace-trust",
+            str(workspace),
+        ]
+    )
+    found = wait_window(lambda title: "Trae" in title, timeout=90)
+    if found is None:
+        raise RuntimeError("Trae CN window did not appear")
+    activate(found[1])
+    time.sleep(1.5)
+    return {
+        "process": process,
+        "base": base,
+        "user": user,
+        "workspace": workspace,
+        "settings": user / "User" / "settings.json",
+        "title": found[1],
+    }
+
+
+def _verify_trae_start(context: dict) -> dict:
+    from computer_use import Computer
+
+    texts: list[str] = []
+    errors: list[str] = []
+    with Computer() as computer:
+        for app_info in [a for a in computer.list_apps() if "Trae" in a.display_name]:
+            try:
+                app = computer.app(app_info.id)
+                observation = _read(app, view="both", full=True, visual="auto")
+                texts.append(observation.text or "")
+            except Exception as error:
+                errors.append(f"{app_info.id}: {type(error).__name__}: {error}")
+    titles = [title for _, title, _ in visible_windows() if "trae_ws" in title and "Trae" in title]
+    combined = "\n".join(texts)
+    return {
+        "success": bool(titles) and bool(combined.strip()) and "欢迎使用" not in combined,
+        "welcome_visible": "欢迎使用" in combined,
+        "titles": titles[-10:],
+        "errors": errors[-5:],
+        "ui_excerpt": combined[-2500:],
+    }
+
+
+def _cleanup_trae(context: dict) -> None:
+    subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            (
+                "Get-CimInstance Win32_Process | Where-Object { "
+                f"$_.CommandLine -like '*{context['base']}*' }} | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+            ),
+        ],
+        timeout=20,
+        check=False,
+    )
+
+
 # --------------------------------------------------------------------------- cases
 
 
@@ -1105,6 +1209,14 @@ def cases() -> dict[str, Case]:
             verify=_verify_vscode_open,
             cleanup=_cleanup_vscode,
         ),
+        "trae_start": Case(
+            name="trae_start",
+            app="Trae CN",
+            prompt="",  # replaced per run below
+            setup=_setup_trae,
+            verify=_verify_trae_start,
+            cleanup=_cleanup_trae,
+        ),
         "wps_type": Case(
             name="wps_type",
             app="WPS Writer",
@@ -1144,6 +1256,8 @@ def materialize(case: Case, run_id: str) -> Case:
         return Case(case.name, case.app, _vscode_file_prompt(workspace, line), case.setup, case.verify, case.cleanup)
     if case.name == "vscode_open":
         return Case(case.name, case.app, _vscode_open_prompt(), case.setup, case.verify, case.cleanup)
+    if case.name == "trae_start":
+        return Case(case.name, case.app, _trae_start_prompt(), case.setup, case.verify, case.cleanup)
     if case.name == "wps_type":
         path = OUTPUTS / run_id / "wps" / "grounding_eval_type.docx"
         line = f"Grounding Type {run_id}"

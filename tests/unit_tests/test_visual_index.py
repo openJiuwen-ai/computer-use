@@ -78,6 +78,51 @@ def test_macos_vision_capture_metadata_reaches_the_visual_index():
     assert index.elements[0].source == "macOSVision"
 
 
+def test_document_text_does_not_hide_an_ocr_only_control():
+    png = _png()
+    metadata = {
+        "id": "capture-1",
+        "visualText": _visual([_line("Export", 20, 20, 60, 20)]),
+    }
+    tree = '17 文档 Document text: "File Edit Export Tools"'
+
+    index = build_visual_index(png, frame_id="capture-1", tree_text=tree, metadata=metadata)
+
+    assert index is not None
+    assert [(item.ref, item.label) for item in index.elements] == [(1, "Export")]
+
+
+def test_addressable_accessibility_row_still_deduplicates_ocr():
+    png = _png()
+    metadata = {
+        "id": "capture-1",
+        "visualText": _visual([_line("Export", 20, 20, 60, 20)]),
+    }
+    tree = '12 按钮 "Export"'
+
+    index = build_visual_index(png, frame_id="capture-1", tree_text=tree, metadata=metadata)
+
+    assert index is None
+
+
+def test_chromium_document_body_allows_auto_visuals():
+    from computer_use.client.computer import App
+
+    index = VisualIndex(
+        frame_id="capture-1",
+        elements=(VisualElementRecord(ref=1, label="Export", rect=(20, 20, 60, 20), frame_id="capture-1"),),
+    )
+
+    class Result:
+        text = '17 文档 Document text: "File Edit"\n  16 窗格 Chrome Legacy Window'
+
+    class PlainDocument:
+        text = '17 文档 Document text: "File Edit"'
+
+    assert App._auto_visual(Result(), index) is True
+    assert App._auto_visual(PlainDocument(), index) is False
+
+
 def test_build_visual_index_deduplicates_accessibility_names():
     png = _png()
     metadata = {

@@ -113,18 +113,24 @@ def _normalize_label(text: str) -> str:
 
 
 def _covered_by_tree(label: str, tree_text: str) -> bool:
-    """Skip text already named by an accessibility row.
+    """Skip text already named by an addressable accessibility row.
 
-    Windows trees often render names without quotes, so exact quoted matching
-    is insufficient. Require a token boundary for multi-character labels while
+    Only the row declaration counts; captured document prose does not. Windows
+    trees often render names without quotes, so exact quoted matching is
+    insufficient. Require a token boundary for multi-character labels while
     keeping one-character OCR digits available for image-only controls.
     """
     if not tree_text:
         return False
-    if f'"{label}"' in tree_text or f"'{label}'" in tree_text:
+    # A document body is prose, not a row name. Chromium accessibility bridges
+    # can flatten an entire editor into one Document text field; dropping OCR
+    # rows because that prose mentions the label removes the only usable
+    # reference for controls the bridge does not expose separately.
+    rows = [line.split("Document text:", 1)[0] for line in tree_text.splitlines()]
+    if any(f'"{label}"' in row or f"'{label}'" in row for row in rows):
         return True
     if len(label) < 2:
         return False
     boundary = r"[A-Za-z0-9_㐀-䶿一-鿿豈-﫿]"
     pattern = rf"(?<!{boundary}){re.escape(label)}(?!{boundary})"
-    return re.search(pattern, tree_text) is not None
+    return any(re.search(pattern, row) is not None for row in rows)

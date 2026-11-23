@@ -443,7 +443,9 @@ class App:
             return True
         # A complete-looking tree can still omit the document/editor body, as
         # WPS Writer does. Document text is the strongest available AX signal.
-        return "Document text:" not in text
+        # A Chromium legacy bridge is different: it reports a document body but
+        # not its controls, so the remaining OCR rows stay useful.
+        return "Document text:" not in text or "Chrome Legacy Window" in text
 
     @synchronous
     def click(self, options=None, *, at, window=None, force_pointer=False):

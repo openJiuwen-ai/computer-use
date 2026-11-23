@@ -243,6 +243,7 @@ _capture_request = obj(
         kind=enum("window", "desktop"),
         maxDimension=number(integer=True, min=1, max=4096),
         retainedCaptures=array(identity).optional(),
+        visualText=boolean().optional(),
     )
 )
 
