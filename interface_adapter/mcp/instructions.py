@@ -41,7 +41,7 @@ class ElementMatch(TypedDict, total=False):
 
 ElementPath = list[str | ElementMatch]  # Ancestor-to-descendant names or matching fields.
 
-@dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True)
 class VisualRef:
     ref: int  # vN from the observation's visual table
 
@@ -158,6 +158,22 @@ class Element:
     # Invoke a secondary action actually shown for this element, including window roots.
     def perform_action(self, action: str) -> ActionResult: ...
 
+class VisualElement:
+    # A pointer-addressable region from App.read(visual=...).
+    @property
+    def ref(self) -> int: ...
+    @property
+    def label(self) -> str: ...
+    @property
+    def rect(self) -> tuple[float, float, float, float]: ...
+    @property
+    def confidence(self) -> float: ...
+    @property
+    def target(self) -> Target: ...
+    def click(self, options: ClickOption | None = None) -> ActionResult: ...
+    def scroll(self, direction: Direction, *, pages: float = 1) -> ActionResult: ...
+    def read_text(self, *, length: int = 4096) -> TextPage: ...
+
 # Read-only result shapes, not objects to construct.
 class AppInfo:
     id: int
@@ -183,10 +199,29 @@ class TextPage:
     total: int
     next: str | None
 
+class VisualElementInfo:
+    ref: int
+    label: str
+    rect: tuple[float, float, float, float]
+    source: str
+    confidence: float
+    frame_id: str
+    @property
+    def center(self) -> tuple[float, float]: ...
+
+class VisualIndex:
+    frame_id: str
+    elements: tuple[VisualElementInfo, ...]
+    truncated: bool
+    source: str
+    detail: str
+    def element(self, ref: int) -> VisualElementInfo | None: ...
+
 class Observation:
     text: str
     screenshot: bytearray | None
     preparation: Mapping[str, object] | None
+    visual: VisualIndex | None
     # Captured details from this observation, not a new UI read. Omit element for all captured details.
     # Print the returned page; length is 1..16384 characters.
     def read_details(
@@ -353,7 +388,7 @@ app.element(VisualRef(1)).click()
 
 Visual references are frame-scoped: they have no accessibility identity or keyboard receiver,
 so `type_text`/`paste`/`press_key` remain unavailable until a real AX element supplies the
-receiver. Resolve a `VisualRef` before the next read and keep the returned `Element`; a later
+receiver. Resolve a `VisualRef` before the next read and keep the returned `VisualElement`; a later
 read invalidates the old vN even though the resolved handle remains safe. The image must be
 delivered before its mapping can be used for input. A new read, scroll, resize, or
 display-scale change invalidates the old vN. Text already named by an AX row is not assigned a

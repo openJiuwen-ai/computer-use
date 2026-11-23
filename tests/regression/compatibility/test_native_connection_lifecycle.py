@@ -113,7 +113,6 @@ def test_cancelled_request_closes_in_the_active_exception_context(tmp_path, monk
     tape = [
         {"version": 6, "id": 0, "method": "hello", "params": {"globalInputAllowed": False}},
         {"version": 6, "session": SESSION, "id": 1, "method": "finish", "params": params},
-        {"version": 6, "session": SESSION, "cancel": 1},
     ]
     ledger, hold = tmp_path / "wire.jsonl", tmp_path / "held"
 
@@ -133,7 +132,7 @@ with Path(ledger).open("w", buffering=1) as output:
     command.pop("timeoutMs")
     output.write(json.dumps(command) + "\n")
     Path(hold).touch()
-    output.write(sys.stdin.readline())
+    sys.stdin.readline()
 """
 
     async def check():
@@ -157,6 +156,16 @@ with Path(ledger).open("w", buffering=1) as output:
             async with asyncio.timeout(3):
                 while not hold.exists():
                     await asyncio.sleep(0.002)
+            # Shutdown can terminate the child before it reads the cancel frame.
+            # Observe the successful pipe write while keeping actual I/O in place.
+            pipe = connection._child.stdin
+            write = pipe.write
+
+            def observe_write(data):
+                write(data)
+                observed.append(("cancel_write", asyncio.current_task(), sys.exception(), json.loads(data)))
+
+            monkeypatch.setattr(pipe, "write", observe_write)
             task.cancel("held request cancelled")
             with pytest.raises(asyncio.CancelledError, match="held request cancelled") as cancelled:
                 await task
@@ -165,6 +174,7 @@ with Path(ledger).open("w", buffering=1) as output:
             set_diagnostic_handler(None)
 
         assert observed == [
+            ("cancel_write", task, cancelled.value, {"version": 6, "session": SESSION, "cancel": 1}),
             ("command_end", task, cancelled.value, None),
             ("invalidate", task, cancelled.value, None),
         ]

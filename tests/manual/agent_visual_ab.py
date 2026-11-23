@@ -153,7 +153,7 @@ async def main(argv=None) -> int:
     required = ("API_BASE", "API_KEY", "MODEL_NAME")
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
-        print(f"Missing environment variables: {', '.join(missing)}", file=sys.stderr)
+        sys.stderr.write(f"Missing environment variables: {', '.join(missing)}\n")
         return 2
     selected = (
         (("treatment", TREATMENT), ("baseline", BASELINE))
@@ -164,15 +164,15 @@ async def main(argv=None) -> int:
     for name, prompt in selected:
         result = await _run_case(name, prompt)
         results.append(result)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-    print("\nSUMMARY")
+        sys.stdout.write(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    sys.stdout.write("\nSUMMARY\n")
     for result in results:
         clicked = any("name=Export" in line for line in result["click_log"])
         answer = result["answer"] or ""
         success = clicked and "clicks=1" in answer
-        print(
+        sys.stdout.write(
             f"{result['case']}: seconds={result['seconds']} tools={result['tool_calls']} "
-            f"clicked_export={clicked} success={success} error={result['error']}"
+            f"clicked_export={clicked} success={success} error={result['error']}\n"
         )
     return 0
 

@@ -29,20 +29,19 @@ def main(argv=None) -> int:
     with Computer() as computer:
         app = computer.app(window_title=args.title)
         observation = app.read(view="both", visual="always")
-        print(observation.text)
+        sys.stdout.write(f"{observation.text}\n")
 
         visual = getattr(observation, "visual", None)
         if visual is None or not visual.elements:
-            print(
+            sys.stderr.write(
                 "\nNo visual elements were captured. Check the platform OCR support "
-                "(Windows language pack or macOS Vision) and that the window is visible.",
-                file=sys.stderr,
+                "(Windows language pack or macOS Vision) and that the window is visible.\n"
             )
             return 2
 
-        print("\nVisual references:")
+        sys.stdout.write("\nVisual references:\n")
         for element in visual.elements:
-            print(f"  v{element.ref}: {element.label!r} rect={element.rect} source={element.source}")
+            sys.stdout.write(f"  v{element.ref}: {element.label!r} rect={element.rect} source={element.source}\n")
 
         if args.click:
             target = next(
@@ -50,12 +49,12 @@ def main(argv=None) -> int:
                 None,
             )
             if target is None:
-                print(f"\nNo visual element contains {args.click!r}.", file=sys.stderr)
+                sys.stderr.write(f"\nNo visual element contains {args.click!r}.\n")
                 return 3
             result = app.element(VisualRef(target.ref)).click()
-            print(f"\nClicked v{target.ref}: status={result.status} detail={result.detail}")
+            sys.stdout.write(f"\nClicked v{target.ref}: status={result.status} detail={result.detail}\n")
             after = app.read(view="tree", visual="never")
-            print(after.text)
+            sys.stdout.write(f"{after.text}\n")
     return 0
 
 

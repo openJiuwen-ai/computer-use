@@ -45,6 +45,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import win32com.client
+
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUTS = ROOT / "outputs" / "grounding_eval"
 WPS_EXE = Path(os.environ.get(
@@ -59,8 +61,6 @@ TRAE_EXE = Path(os.environ.get(
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-
-import win32com.client
 
 # --------------------------------------------------------------------------- window helpers
 

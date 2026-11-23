@@ -64,6 +64,27 @@ def test_documented_api_is_self_contained():
     assert referenced <= defined
 
 
+def test_documented_visual_types_match_the_public_interface():
+    def visual_shapes(module):
+        classes = {node.name: node for node in module.body if isinstance(node, ast.ClassDef)}
+        shapes = {}
+        for name in ("VisualRef", "VisualElement", "VisualElementInfo", "VisualIndex"):
+            definition = classes[name]
+            if ast.get_docstring(definition) is not None:
+                definition.body.pop(0)
+            shapes[name] = ast.dump(definition)
+        shapes["Observation.visual"] = next(
+            ast.dump(member)
+            for member in classes["Observation"].body
+            if isinstance(member, ast.AnnAssign) and ast.unparse(member.target) == "visual"
+        )
+        return shapes
+
+    reference = api_reference(DESCRIPTION)
+    public = ast.parse(files("computer_use").joinpath("__init__.pyi").read_text(encoding="utf-8"))
+    assert visual_shapes(reference) == visual_shapes(public)
+
+
 def test_mcp_tool_list_delivers_the_api_reference():
     server = ComputerUseServer()
     handler = server.server.request_handlers[types.ListToolsRequest]

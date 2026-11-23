@@ -128,7 +128,7 @@ def main(argv=None) -> int:
         rows = parse_rows(observation.text)
 
     if not rows:
-        print("No numbered rows were parsed. Check the tree view and window title.", file=sys.stderr)
+        sys.stderr.write("No numbered rows were parsed. Check the tree view and window title.\n")
         return 2
 
     named = [row for row in rows if row[2].strip()]
@@ -139,23 +139,27 @@ def main(argv=None) -> int:
     roles = Counter(row[1] for row in rows)
     unnamed_roles = Counter(row[1] for row in unnamed)
 
-    print(f"window: {args.title!r}")
-    print(f"parsed rows: {len(rows)}")
-    print(f"  named: {len(named)}   unnamed: {len(unnamed)}")
-    print(f"  unnamed and clickable by role: {len(unnamed_clickable)}")
-    print(f"  unnamed and silent (image/text/group): {len(unnamed_silent)}")
-    print(f"  unnamed share: {len(unnamed) / len(rows):.1%}")
-    print()
-    print("top roles:", ", ".join(f"{role}={count}" for role, count in roles.most_common(10)))
-    print("top unnamed roles:", ", ".join(f"{role}={count}" for role, count in unnamed_roles.most_common(10)))
-    print()
+    top_roles = ", ".join(f"{role}={count}" for role, count in roles.most_common(10))
+    top_unnamed_roles = ", ".join(f"{role}={count}" for role, count in unnamed_roles.most_common(10))
+    sys.stdout.write(
+        f"window: {args.title!r}\n"
+        f"parsed rows: {len(rows)}\n"
+        f"  named: {len(named)}   unnamed: {len(unnamed)}\n"
+        f"  unnamed and clickable by role: {len(unnamed_clickable)}\n"
+        f"  unnamed and silent (image/text/group): {len(unnamed_silent)}\n"
+        f"  unnamed share: {len(unnamed) / len(rows):.1%}\n\n"
+        f"top roles: {top_roles}\n"
+        f"top unnamed roles: {top_unnamed_roles}\n\n"
+    )
 
     sample = unnamed_clickable[: max(0, args.sample)]
     if not sample:
-        print("No unnamed clickable nodes on this window, so role-based candidates would add nothing here.")
+        sys.stdout.write(
+            "No unnamed clickable nodes on this window, so role-based candidates would add nothing here.\n"
+        )
         return 0
 
-    print(f"inspecting {len(sample)} unnamed clickable nodes for retained geometry:")
+    sys.stdout.write(f"inspecting {len(sample)} unnamed clickable nodes for retained geometry:\n")
     found = 0
     for ref, role, _name, _depth in sample:
         details = observation.read_details(element=ref, length=args.details)
@@ -163,16 +167,17 @@ def main(argv=None) -> int:
         markers = [key for key in ("BoundingRectangle", "nativeBounds", "ClickablePoint", "IsOffscreen") if key in text]
         if markers:
             found += 1
-        print(f"  ref {ref:>4} {role:<14} fields={markers or 'none'}")
+        sys.stdout.write(f"  ref {ref:>4} {role:<14} fields={markers or 'none'}\n")
 
-    print()
+    sys.stdout.write("\n")
     if found:
-        print(f"{found}/{len(sample)} sampled nodes expose geometry through read_details; ax_ref fusion has its input.")
+        sys.stdout.write(
+            f"{found}/{len(sample)} sampled nodes expose geometry through read_details; ax_ref fusion has its input.\n"
+        )
     else:
-        print(
+        sys.stderr.write(
             "No sampled node exposed geometry. Node rectangles are not retained in the current read path, "
-            "so a narrow native geometry query is required before fusion.",
-            file=sys.stderr,
+            "so a narrow native geometry query is required before fusion.\n"
         )
     return 0
 
