@@ -164,9 +164,7 @@ impl LegacySnapshot {
         Ok(LegacyRoot { section, claims: Some(claims), deferred_urls, published_columns: packed.published_table_columns })
     }
 
-    fn fallback_root(
-        &self, members: &[String], failure: &PresentationFailure, budget: &mut DeliveryBudget<'_>,
-    ) -> Result<LegacyRoot> {
+    fn fallback_root(&self, members: &[String], failure: &PresentationFailure) -> Result<LegacyRoot> {
         let capture = &self.capture.capture;
         let snapshot = &capture.snapshot;
         let source = DetailSource::new(
@@ -175,7 +173,7 @@ impl LegacySnapshot {
             entries(self.capture.semantic.get("refs")).iter()
                 .filter_map(|(reference, token)| token.as_str().map(|token| (reference.as_str(), token))),
         )?;
-        let rendered = fallback::render(&source, members, failure, budget)?;
+        let rendered = fallback::render(&source, members, failure)?;
         Ok(LegacyRoot {
             section: rendered.section, claims: None, deferred_urls: Vec::new(), published_columns: Vec::new(),
         })
@@ -189,7 +187,7 @@ impl LegacySnapshot {
         for branch in &self.capture.branches {
             budget.step()?;
             let root = match &branch.projection {
-                Err(failure) => self.fallback_root(&failure.references, &failure.failure, budget)?,
+                Err(failure) => self.fallback_root(&failure.references, &failure.failure)?,
                 Ok(projection) => match self.render_root(projection, budget) {
                     Ok(root) => root,
                     Err(error) => {
@@ -203,7 +201,7 @@ impl LegacySnapshot {
                             error, detail: detail.to_owned(), stage: FailureStage::Terminal,
                         };
                         let members = branch.member_refs().map_err(|_| TextError::Invalid("legacy source members"))?;
-                        self.fallback_root(&members, &failure, budget)?
+                        self.fallback_root(&members, &failure)?
                     }
                 },
             };

@@ -269,7 +269,7 @@ impl CompactSnapshot {
             let context = contexts.and_then(|contexts| contexts.get(reference));
             let (section, used_fallback) = match root {
                 CompactBranch::Uncompressed(failure) => (
-                    self.render_fallback([backend, session, observation], &failure.references, &failure.failure, budget)?, true,
+                    self.render_fallback([backend, session, observation], &failure.references, &failure.failure)?, true,
                 ),
                 CompactBranch::Projected(root) => match render_root(root, [backend, session, observation], capture.tokens(), budget) {
                     Ok((section, catalogue)) => {
@@ -282,7 +282,7 @@ impl CompactSnapshot {
                     Err(error) => {
                         let failure = presentation_failure(error, FailureStage::Terminal)?;
                         let members = branch.member_refs().map_err(CompactError::Source)?;
-                        (self.render_fallback([backend, session, observation], &members, &failure, budget)?, true)
+                        (self.render_fallback([backend, session, observation], &members, &failure)?, true)
                     }
                 }
             };
@@ -304,7 +304,6 @@ impl CompactSnapshot {
 
     fn render_fallback(
         &self, [backend, session, observation]: [&str; 3], members: &[String], failure: &PresentationFailure,
-        budget: &mut DeliveryBudget<'_>,
     ) -> Result<RenderedSection, CompactError> {
         let snapshot = &self.capture.capture.snapshot;
         let refs = self.capture.semantic.get("refs").and_then(Value::as_map).ok_or(CompactError::MissingRoot)?;
@@ -313,7 +312,7 @@ impl CompactSnapshot {
             backend, session, observation, &[], &snapshot.facts, issues,
             refs.iter().filter_map(|(reference, token)| token.as_str().map(|token| (reference.as_str(), token))),
         ).map_err(CompactError::Render)?;
-        fallback::render(&source, members, failure, budget).map(|rendered| rendered.section).map_err(CompactError::Render)
+        fallback::render(&source, members, failure).map(|rendered| rendered.section).map_err(CompactError::Render)
     }
 
     fn accounting_parts(&self, uncompressed: &[bool]) -> Vec<AccountingPart<'_>> {
