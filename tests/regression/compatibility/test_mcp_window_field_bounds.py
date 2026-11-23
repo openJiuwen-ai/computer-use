@@ -132,6 +132,49 @@ def captured_field(x, y, *, owner=None, in_child=False, field_width=240, enabled
     return raw
 
 
+def captured_windows_field(x):
+    def value(data, native_type=None):
+        if native_type is None:
+            native_type = {str: "System.String", bool: "System.Boolean", int: "System.Int32"}[type(data)]
+        return {"nativeType": native_type, "data": data}
+
+    def node(token, control_type, bounds, relation_name, related):
+        native_type = "IUIAutomationElement"
+        edge = value({"items": [value({"ref": related}, native_type)]}, "array")
+        native_rect = value(
+            {"fields": [[key, value(coordinate)] for key, coordinate in bounds.items()]},
+            "record",
+        )
+        details = {"relation": True, "state": "complete", "certainty": "confirmed", "total": 1}
+        read = {"complete": True, "details": [[key, value(fact)] for key, fact in details.items()]}
+        return {
+            "id": token,
+            "source": "windows.uia",
+            "nativeType": native_type,
+            "kind": "element",
+            "properties": [
+                {"key": ["windows.uia", "ControlType"], "value": value(control_type)},
+                {"key": ["windows.uia", "Name"], "value": value(token)},
+                {"key": ["windows.uia", "IsEnabled"], "value": value(True)},
+                {"key": ["windows.uia", "IsOffscreen"], "value": value(False)},
+                {"key": ["windows.uia", "BoundingRectangle"], "value": native_rect},
+                {"key": ["windows.uia", relation_name], "value": edge, "read": read},
+            ],
+        }
+
+    return {
+        "kind": "observation",
+        "platform": "windows",
+        "session": "session",
+        "roots": ["root"],
+        "nodes": [
+            node("root", "ControlType.Window", dict(x=0, y=0, width=900, height=700), "RawViewChildren", "field"),
+            node("field", "ControlType.Edit", dict(x=x, y=200, width=120, height=22), "RawViewParent", "root"),
+        ],
+        "read": {"intervalNs": [1, 2], "details": [["surface", value("surface")], ["observation_id", value("capture")]]},
+    }
+
+
 def delivery(engine, observation, source, aliases):
     frame = engine.open_read_frame("json", json.dumps(observation).encode(), 8192)
     capture = frame.capture("window", ("nativeTextInput", "nativeActuators"))
@@ -188,6 +231,23 @@ def test_outside_bounds_clue_is_shown_on_the_exact_field(native_read):
     result = delivery(native_read, captured_field(-974, -696), Record(), DisplayReferences("session"))
     row = next(line for line in result["document"].text.splitlines() if "Presets Search" in line)
     assert CLUE in row, row
+
+
+def test_windows_off_frame_field_keeps_its_existing_diff_without_macos_clue(native_read):
+    source, aliases = Record(), DisplayReferences("session")
+    inside = delivery(native_read, captured_windows_field(100), source, aliases)
+    outside = delivery(native_read, captured_windows_field(-150), source, aliases)
+    reference = next(ref for ref, token in outside["refs"].items() if token == "field")
+    assert CLUE not in outside["document"].text
+    presenter = ObservationPresenter()
+    try:
+        presenter.text(inside)
+        presenter.delivered(inside)
+        diff = presenter.text(outside)
+        assert "Tree: diff" in diff
+        assert f"~\t{reference} text field" in diff and CLUE not in diff
+    finally:
+        presenter.close()
 
 
 @pytest.mark.parametrize(

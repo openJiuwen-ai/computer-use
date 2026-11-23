@@ -143,7 +143,6 @@ impl CompactRoot {
         let readable = content::readable::plan(projection, &interface, &atoms, &sharing).map_err(CompactError::Content)?;
         let options = &projection.options;
         let mut outside_window_fields = if options.compact && options.public_api && options.share_descriptions
-            && snapshot.observation.get("backend").and_then(Value::as_str) == Some("macos")
             && capture.semantic.get("scope_kind").and_then(Value::as_str) == Some("window")
         {
             outside_window_fields(&snapshot.observation, &capture.geometry, projection.root)
@@ -157,11 +156,15 @@ impl CompactRoot {
         })
     }
 
-    fn render(&self, budget: &mut DeliveryBudget<'_>) -> Result<GeometricRendered, CompactError> {
+    pub(crate) fn render(&self, backend: &str, budget: &mut DeliveryBudget<'_>) -> Result<GeometricRendered, CompactError> {
         let mut options = WriterOptions::from_plans(
             &self.interface, &self.atoms, Some(&self.disclosure), Some(&self.fields), Some(&self.readable), Some(&self.coverage),
         ).map_err(CompactError::Render)?.with_sharing(&self.atoms, Some(&self.sharing), Some(&self.slices))
-            .map_err(CompactError::Render)?.with_outside_window(&self.outside_window_fields);
+            .map_err(CompactError::Render)?;
+        // The geometry is also part of comparison evidence on other platforms.
+        if backend == "macos" {
+            options = options.with_outside_window(&self.outside_window_fields);
+        }
         options.groups = Some(&self.groups);
         options.collections = Some(&self.collections);
         render_geometric(&self.interface, &self.projection, &self.atoms, &options, budget).map_err(CompactError::Render)
@@ -362,7 +365,7 @@ fn presentation_failure(error: CompactError, stage: FailureStage) -> Result<Pres
 fn render_root(
     root: &CompactRoot, capture: [&str; 3], tokens: &[String], budget: &mut DeliveryBudget<'_>,
 ) -> Result<(RenderedSection, Option<(String, String)>), CompactError> {
-    let GeometricRendered { section, background } = root.render(budget)?;
+    let GeometricRendered { section, background } = root.render(capture[0], budget)?;
     let catalogue = if root.groups.groups.is_empty() {
         None
     } else {

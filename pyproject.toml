@@ -62,7 +62,7 @@ computer_use = ["*.pyi", "py.typed"]
 "computer_use_agent.cli" = ["config.example.json"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/unit_tests"]
+testpaths = ["tests"]
 pythonpath = ["tests"]
 addopts = ["-v", "--html=outputs/unit_test_report.html", "--self-contained-html", "--ignore=build"]
 
