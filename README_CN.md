@@ -96,6 +96,7 @@ computer-use/
 │   ├── windows/
 │   └── linux/
 ├── docs/                    # 构建、安装与接入指南
+├── osworld/                 # 在 OSWorld-Verified 上运行 DeepAgent（使用你自己的 OSWorld 检出）
 ├── scripts/                 # 原生构建、权限检查与资源生成
 ├── tests/                   # 单元测试
 ├── pyproject.toml           # 包元数据、依赖与命令行入口
@@ -108,6 +109,7 @@ computer-use/
 - [从源码构建：macOS、Windows 和 Linux 依赖](docs/build-from-source.md)
 - [MCP 构建、安装与接入](docs/mcp.md)
 - [DeepAgent 构建、安装与接入](docs/deepagent.md)
+- [在 OSWorld-Verified 上运行 DeepAgent：环境搭建与运行](osworld/docs/JIUWEN_SETUP.md)（[概览](osworld/README.md)）
 - [开发打包说明](PACKAGING.md)
 - [DeepAgent 接入](computer_use_agent/agent.py)：Agent 构建、标准调用与会话生命周期。
 - [DeepAgent 工具](computer_use_agent/toolkit.py)：已有 openJiuwen 应用的工具接入。

@@ -122,9 +122,14 @@ class NativeAccessibility:
         if clear is not None:
             clear(obj)
         else:
-            # Older libraries have only recursive clear_cache, which can
-            # invalidate descendants. Disable caching for this object instead.
-            self._a.Accessible.set_cache_mask(obj, self._a.Cache.NONE)
+            # Older libraries (before clear_cache_single) have only the
+            # recursive clear_cache: descendants refetch on their next read.
+            # Disabling the cache instead deadlocks: with no cached states,
+            # libatspi 2.44 answers its own state-change handling over D-Bus
+            # while dispatching a pending call, and both wait on the same
+            # connection (OSWorld's Ubuntu 22.04 VM: application discovery
+            # hung until the request timeout).
+            self._a.Accessible.clear_cache(obj)
 
     def event(self, event, *_):
         if self._state != "ready":

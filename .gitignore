@@ -25,3 +25,9 @@ os_adapter/linux/.venv/
 /computer_use_engine/interaction/read/accessibility/_ax_read.*.so
 /computer_use_engine/interaction/read/accessibility/_ax_read.*.pyd
 /computer_use_engine/interaction/read/accessibility/_ax_read_licenses/
+
+# OSWorld adapter (osworld/): run results, openjiuwen logs from its tests, the VM agent environment, keys
+/results/
+/osworld/logs/
+/osworld/vm_env/dist/
+.env
