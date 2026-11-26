@@ -1,0 +1,17 @@
+chrome/99146c54-4f37-4ab8-9327-5f3291665e1e
+chrome/b4f95342-463e-4179-8c3f-193cd7241fb2
+gimp/8ea73f6f-9689-42ad-8c60-195bbf06a7ba
+libreoffice_calc/2bd59342-0664-4ccb-ba87-79379096cc08
+libreoffice_impress/04578141-1d42-4146-b9cf-6fab4ce5fd74
+libreoffice_impress/841b50aa-df53-47bd-a73a-22d3a9f73160
+libreoffice_writer/4bcb1253-a636-4df4-8cb0-a35c04dfef31
+multi_apps/3680a5ee-6870-426a-a997-eba929a0d25c
+multi_apps/69acbb55-d945-4927-a87b-8480e1a5bb7e
+multi_apps/881deb30-9549-4583-a841-8270c65f2a17
+os/4783cc41-c03c-4e1b-89b4-50658f642bd5
+os/a462a795-fdc7-4b23-b689-e8b6df786b78
+thunderbird/08c73485-7c6d-4681-999d-919f5c32dcfa
+vlc/aa4b5023-aef6-4ed9-bdc9-705f59ab9ad6
+vlc/efcf0d81-0835-4880-b2fd-d866e8bc2294
+vs_code/847a96b6-df94-4927-97e6-8cc9ea66ced7
+vs_code/971cbb5b-3cbf-4ff7-9e24-b5c84fcebfa6

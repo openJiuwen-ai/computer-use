@@ -1,0 +1,8 @@
+chrome/3720f614-37fd-4d04-8a6b-76f54f8c222d
+gimp/f723c744-e62c-4ae6-98d1-750d3cd7d79d
+libreoffice_calc/0cecd4f3-74de-457b-ba94-29ad6b5dafb6
+libreoffice_impress/358aa0a7-6677-453f-ae35-e440f004c31e
+libreoffice_writer/0e47de2a-32e0-456c-a366-8c607ef7a9d2
+multi_apps/98e8e339-5f91-4ed2-b2b2-12647cb134f4
+os/13584542-872b-42d8-b299-866967b5c3ef
+vs_code/c6bf789c-ba3a-4209-971d-b63abf0ab733

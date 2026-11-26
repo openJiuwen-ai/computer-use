@@ -96,6 +96,7 @@ computer-use/
 │   ├── windows/
 │   └── linux/
 ├── docs/                    # build, installation and integration guides
+├── osworld/                 # running the DeepAgent on OSWorld-Verified (your own OSWorld checkout)
 ├── scripts/                 # native build, permissions and resource generation
 ├── tests/                   # unit tests
 ├── pyproject.toml           # package metadata, dependencies and CLI entry points
@@ -108,6 +109,7 @@ computer-use/
 - [Build from source: macOS, Windows and Linux dependencies](docs/build-from-source.en.md)
 - [MCP build, installation and integration](docs/mcp.en.md)
 - [DeepAgent build, installation and integration](docs/deepagent.en.md)
+- [Run the DeepAgent on OSWorld-Verified: setup and running](osworld/docs/JIUWEN_SETUP.md) ([overview](osworld/README.md))
 - [Development packaging](PACKAGING.md)
 
 - [DeepAgent integration](computer_use_agent/agent.py): agent construction, standard invocation and conversation lifecycle.
