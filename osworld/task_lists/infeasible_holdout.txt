@@ -1,0 +1,3 @@
+chrome/480bcfea-d68f-4aaa-a0a9-2589ef319381
+gimp/045bf3ff-9077-4b86-b483-a1040a949cff
+gimp/e19bd559-633b-4b02-940f-d946248f088e

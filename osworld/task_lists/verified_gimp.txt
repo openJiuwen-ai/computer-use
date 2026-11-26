@@ -1,0 +1,27 @@
+# Every OSWorld-Verified gimp task (evaluation_examples/test_nogdrive.json), 26 tasks; none is a proxy task.
+gimp/7a4deb26-d57d-4ea9-9a73-630f66a7b568
+gimp/554785e9-4523-4e7a-b8e1-8016f565f56a
+gimp/77b8ab4d-994f-43ac-8930-8ca087d7c4b4
+gimp/f4aec372-4fb0-4df5-a52b-79e0e2a5d6ce
+gimp/d52d6308-ec58-42b7-a2c9-de80e4837b2b
+gimp/2a729ded-3296-423d-aec4-7dd55ed5fbb3
+gimp/b148e375-fe0b-4bec-90e7-38632b0d73c2
+gimp/a746add2-cab0-4740-ac36-c3769d9bfb46
+gimp/7b7617bd-57cc-468e-9c91-40c4ec2bcb3d
+gimp/d16c99dc-2a1e-46f2-b350-d97c86c85c15
+gimp/06ca5602-62ca-47f6-ad4f-da151cde54cc
+gimp/e2dd0213-26db-4349-abe5-d5667bfd725c
+gimp/f723c744-e62c-4ae6-98d1-750d3cd7d79d
+gimp/72f83cdc-bf76-4531-9a1b-eb893a13f8aa
+gimp/7767eef2-56a3-4cea-8c9f-48c070c7d65b
+gimp/734d6579-c07d-47a8-9ae2-13339795476b
+gimp/e19bd559-633b-4b02-940f-d946248f088e
+gimp/38f48d40-764e-4e77-a7cf-51dfce880291
+gimp/fbb548ca-c2a6-4601-9204-e39a2efc507b
+gimp/5ca86c6f-f317-49d8-b6a7-b527541caae8
+gimp/62f7fd55-0687-4a43-b6e1-3eda16fc6252
+gimp/8ea73f6f-9689-42ad-8c60-195bbf06a7ba
+gimp/58d3eeeb-e9d0-499f-962e-fd0db2a744d8
+gimp/2e6f678f-472d-4c55-99cc-8e7c5c402a71
+gimp/045bf3ff-9077-4b86-b483-a1040a949cff
+gimp/dbbf4b99-2253-4b10-9274-45f246af2466
