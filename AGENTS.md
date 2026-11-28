@@ -55,4 +55,4 @@ SDK 保持单一执行主干，接入层复用能力。Pipeline 显式组合，P
 
 验收兼看新场景与整体代价：一次调用完成、模型补救轮数、错目标、重复效果、误拒绝、延迟长尾及三档覆盖；检查新应用是否仍频繁要求修改公共执行主干。
 
-接口及运行方式见 [README_CN.md](README_CN.md)，阶段约束见[实施方案](../cua-docs/ga-incremental-improvement-plan.zh-CN.md)，准则依据见[会话复盘](../cua-docs/session-lessons-to-design-principles-20261103.zh-CN.md)。
+接口及运行方式见 [README_CN.md](README_CN.md)；阶段约束与准则依据见 `cua-docs` 仓库（不在本仓内）。
